@@ -3,7 +3,7 @@
 import { wagmiAdapter, projectId, networks } from '@/config'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createAppKit } from '@reown/appkit/react'
-import React, { type ReactNode, type PropsWithChildren } from 'react'
+import React, { type ReactNode } from 'react'
 import { cookieToInitialState, WagmiProvider, type Config } from 'wagmi'
 
 // Set up queryClient
@@ -17,16 +17,16 @@ if (!projectId) {
 const metadata = {
   name: 'appkit-example',
   description: 'AppKit Example',
-  url: 'https://frontpermi.vercel.app/',
+  url: 'https://frontpermi.vercel.app/', // origin must match your domain & subdomain
   icons: ['https://avatars.githubusercontent.com/u/179229932']
 }
 
-// Create the modal using todas las networks
+// Create the modal
 const modal = createAppKit({
   adapters: [wagmiAdapter],
   projectId,
-  networks, // <- usa el array exportado desde config
-  defaultNetwork: networks.find(n => n.id === 1) ?? networks[0],
+  networks: networks as unknown as [any, ...any[]],
+  defaultNetwork: (networks.find((n: any) => n.id === 1) ?? networks[0]) as any,
   metadata,
   features: {
     email: true,
@@ -35,12 +35,7 @@ const modal = createAppKit({
   }
 })
 
-// Tipado correcto para las props del provider: incluye children
-type ContextProviderProps = PropsWithChildren<{
-  cookies: string | null
-}>
-
-export default function ContextProvider({ children, cookies }: ContextProviderProps) {
+function ContextProvider({ children, cookies }: { children: ReactNode; cookies: string | null }) {
   const initialState = cookieToInitialState(wagmiAdapter.wagmiConfig as Config, cookies)
 
   return (
@@ -49,3 +44,5 @@ export default function ContextProvider({ children, cookies }: ContextProviderPr
     </WagmiProvider>
   )
 }
+
+export default ContextProvider
