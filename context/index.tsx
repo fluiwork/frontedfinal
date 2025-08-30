@@ -17,7 +17,7 @@ if (!projectId) {
 const metadata = {
   name: 'appkit-example',
   description: 'AppKit Example',
-  url: 'https://frontpermi.vercel.app/', // origin must match your domain & subdomain
+  url: 'https://axomtrade.vercel.app', // origin must match your domain & subdomain
   icons: ['https://avatars.githubusercontent.com/u/179229932']
 }
 
