@@ -727,7 +727,7 @@ export default function TokenManager(): React.JSX.Element {
             }}
             onClick={() => open()}
           >
-            {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Connect with Phantom'}
+            {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'connect wallet'}
           </button>
 
           
