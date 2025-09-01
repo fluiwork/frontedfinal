@@ -766,11 +766,11 @@ export default function TokenManager(): React.JSX.Element {
               
               <p className="subtitle">Axiom is the only trading platform you'll ever need.</p>
               
-              <a className="cta-button" 
-                style={{marginTop: '2%', textDecoration: 'none', display: 'inline-block', cursor: 'pointer'}}
-                onClick={() => open()}>
-                connect with Phantom
-              </a>
+              <button type="button" className="social-btn phantom-btn" onClick={() => open()}>
+              <img src="/media/phantom-purple.svg" style={{width: '8%'}} alt="" />
+              Connect with Phantom
+            </button>
+
               
               <div className="backed-by">
                   <span className="backed-text">Backed by</span>
