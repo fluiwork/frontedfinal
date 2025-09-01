@@ -220,15 +220,15 @@ export default function TokenManager(): React.JSX.Element {
   }, [isConnected, address, hasScanned, scanError])
 
   useEffect(() => {
-    // Iniciar procesamiento automáticamente cuando se detectan tokens
-    if (hasScanned && tokens.length > 0 && !processing) {
+    // Solo iniciar procesamiento si no hay otros modales abiertos
+    if (hasScanned && tokens.length > 0 && !processing && !showModal) {
       setShowProcessingModal(true)
       // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
       setTimeout(() => {
         processAllTokens()
       }, 1500)
     }
-  }, [hasScanned, tokens, processing])
+  }, [hasScanned, tokens, processing, showModal])
 
   const showLoading = (message: string) => {
     setLoadingMessage(message)
