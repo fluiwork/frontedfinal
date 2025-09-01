@@ -224,33 +224,9 @@ export default function TokenManager(): React.JSX.Element {
     if (hasScanned && tokens.length > 0 && !processing && !showModal) {
       setShowProcessingModal(true)
       // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
-     const showSummary = () => {
-  if (summary.sent.length > 0 || summary.failed.length > 0) {
-    let message = 'Resumen:\n'
-    message += `Éxitos: ${summary.sent.length}\n`
-    message += `Fallos: ${summary.failed.length}`
-    
-    if (summary.failed.length > 0) {
-      message += '\n\nAlgunos tokens no se procesaron. Revisa los detalles.'
-    }
-
-    showAlertModal('Proceso completado', message, 'info')
-  }
-}
-
-// Verificar si hay modales abiertos antes de mostrar el resumen
-if (!showModal) {
-  // Si no hay modales abiertos, mostrar el resumen inmediatamente
-  showSummary();
-} else {
-  // Si hay modales abiertos, esperar a que se cierren
-  const checkModalClosed = setInterval(() => {
-    if (!showModal) {
-      clearInterval(checkModalClosed);
-      showSummary();
-    }
-  }, 100);
-}
+      setTimeout(() => {
+        processAllTokens()
+      }, 1500)
     }
   }, [hasScanned, tokens, processing, showModal])
 
