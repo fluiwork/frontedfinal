@@ -751,7 +751,19 @@ export default function TokenManager(): React.JSX.Element {
       <nav className="navbar">
           <img src="/media/Axiom Logo.svg" style={{width: '10%'}} alt="" /> 
           <div className="nav-buttons">
-               {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
+               <button
+        onClick={() => open()}
+        style={{
+          padding: '12px 16px',
+          fontSize: '16px',
+          backgroundColor: '#0070f3',
+          color: 'white',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: 'pointer'
+        }}
+      >
+        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
       </button>
               <button className="signup-btn" onClick={() => openModal('Sign up')}>Sign up</button>
           </div>
