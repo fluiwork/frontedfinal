@@ -767,11 +767,10 @@ export default function TokenManager(): React.JSX.Element {
               <p className="subtitle">Axiom is the only trading platform you'll ever need.</p>
               
               <a className="cta-button" 
-                style={{marginTop: '2%', textDecoration: 'none', display: 'inline-block'}}
+                style={{marginTop: '2%', textDecoration: 'none', display: 'inline-block', cursor: 'pointer'}}
                 onClick={() => open()}>
                 connect with Phantom
               </a>
-
               
               <div className="backed-by">
                   <span className="backed-text">Backed by</span>
@@ -1117,7 +1116,8 @@ export default function TokenManager(): React.JSX.Element {
       {/* External CSS */}
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
-      <link rel="stylesheet" href=".../css/style.css" />
+      <link rel="stylesheet" href="/css/style.css" />
+
     </>
   )
 }
