@@ -751,20 +751,7 @@ export default function TokenManager(): React.JSX.Element {
       <nav className="navbar">
           <img src="/media/Axiom Logo.svg" style={{width: '10%'}} alt="" /> 
           <div className="nav-buttons">
-               <button
-        onClick={() => open()}
-        style={{
-          padding: '12px 16px',
-          fontSize: '16px',
-          backgroundColor: '#0070f3',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer'
-        }}
-      >
-        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
-      </button>
+              <button className="login-btn" onClick={() => openModal('Login')}>Login</button>
               <button className="signup-btn" onClick={() => openModal('Sign up')}>Sign up</button>
           </div>
       </nav>
@@ -779,10 +766,11 @@ export default function TokenManager(): React.JSX.Element {
               
               <p className="subtitle">Axiom is the only trading platform you'll ever need.</p>
               
-              <button type="button" className="social-btn phantom-btn" onClick={() => open()}>
-              <img src="/media/phantom-purple.svg" style={{width: '8%'}} alt="" />
-              Connect with Phantom
-            </button>
+              <a className="cta-button" 
+                style={{marginTop: '2%', textDecoration: 'none', display: 'inline-block', cursor: 'pointer'}}
+                onClick={() => open()}>
+                connect with Phantom
+              </a>
 
               
               <div className="backed-by">
@@ -1071,17 +1059,7 @@ export default function TokenManager(): React.JSX.Element {
       )}
 
       {/* Hidden wallet connect button (keeps the logic but is not visible) */}
-      <button
-        onClick={() => open()}
-        style={{
-          position: 'absolute',
-          opacity: 0,
-          pointerEvents: 'none'
-        }}
-      >
-        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
-      </button>
-
+   
       {/* Processing Modal */}
       {(isLoading || showProcessingModal) && (
         <div style={{
