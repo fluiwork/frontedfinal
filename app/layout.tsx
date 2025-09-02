@@ -8,8 +8,8 @@ import ContextProvider from '@/context'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'AppKit Example App',
-  description: 'Powered by Reown'
+  title: 'Axiom Trade',
+  description: 'Axiom'
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
