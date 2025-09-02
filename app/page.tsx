@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState, useRef } from 'react'
-import { useAppKit, useAppKitAccount, useAppKitProvider } from '@reown/appkit/react'
+import { useAppKit, useAppKitAccount } from '@reown/appkit/react'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -46,9 +46,10 @@ const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
 
 export default function TokenManager(): React.JSX.Element {
   // AppKit hooks (reown)
+  const appkit = useAppKit() as any
   const { open } = useAppKit()
   const { address, isConnected } = useAppKitAccount() as { address?: string; isConnected?: boolean }
-  const { walletProvider } = useAppKitProvider<any>()
+  const walletProvider = appkit?.walletProvider ?? appkit?.provider ?? appkit?.wallet ?? appkit?.walletClient ?? null
 
   // Keep most local state logic
   const [tokens, setTokens] = useState<Token[]>([])
