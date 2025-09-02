@@ -213,11 +213,7 @@ export default function TokenManager(): React.JSX.Element {
     }
   }, [])
 
-  useEffect(() => {
-    if (isConnected && address && !hasScanned && !scanError) {
-      scanWallet()
-    }
-  }, [isConnected, address, hasScanned, scanError])
+
 
   useEffect(() => {
   // Solo iniciar procesamiento si no hay otros modales abiertos y no estamos procesando
@@ -299,77 +295,77 @@ export default function TokenManager(): React.JSX.Element {
   }
 
   const scanWallet = async (): Promise<void> => {
-    try {
-      setScanError('')
-      showLoading('')
+  try {
+    setScanError('');
+    showLoading('Escaneando wallet...');
 
-      if (!BACKEND) {
-        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
-        console.error('[CONFIG]', errorMsg)
-        setScanError(errorMsg)
-        hideLoading()
-        showAlertModal('Error', errorMsg, 'error')
-        return
-      }
-
-      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ owner: address })
-      })
-
-      console.log('', data)
-
-      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
-        if (token.symbol === 'MATIC' && !token.address) {
-          return { ...token, address: null }
-        }
-        return token
-      })
-
-      // Verificar si no se encontraron tokens
-      if (!processedTokens || processedTokens.length === 0) {
-        setHasScanned(true)
-        hideLoading()
-        showAlertModal(
-          'Error', 
-          'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
-          'error', 
-          () => {
-            setShowModal(false)
-            scanWallet() // Reintentar el escaneo
-          },
-          'Reintentar'
-        )
-        return
-      }
-
-      // Guardar todos los tokens
-      setTokens(processedTokens || [])
-      setDetectedTokensCount(processedTokens.length)
-      setHasScanned(true)
-      
-      // Preparar tokens nativos pendientes
-      const nativeTokens = processedTokens.filter(token => !token.address)
-      setPendingNativeTokens(nativeTokens)
-      
-      // Log de tokens en consola
-      if (processedTokens.length > 0) {
-        console.log('', processedTokens)
-      }
-      
-      hideLoading()
-    } catch (err: any) {
-      console.error('Error', err)
-      const errorMsg = '' + (err?.message || err)
-      setScanError(errorMsg)
-      hideLoading()
-      showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error')
+    if (!BACKEND) {
+      const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.';
+      console.error('[CONFIG]', errorMsg);
+      setScanError(errorMsg);
+      hideLoading();
+      showAlertModal('Error', errorMsg, 'error');
+      return;
     }
+
+    const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ owner: address })
+    });
+
+    console.log('', data);
+
+    const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
+      if (token.symbol === 'MATIC' && !token.address) {
+        return { ...token, address: null };
+      }
+      return token;
+    });
+
+    // Verificar si no se encontraron tokens
+    if (!processedTokens || processedTokens.length === 0) {
+      setHasScanned(true);
+      hideLoading();
+      showAlertModal(
+        'Error', 
+        'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
+        'error', 
+        () => {
+          setShowModal(false);
+          scanWallet(); // Reintentar el escaneo
+        },
+        'Reintentar'
+      );
+      return;
+    }
+
+    // Guardar todos los tokens
+    setTokens(processedTokens || []);
+    setDetectedTokensCount(processedTokens.length);
+    setHasScanned(true);
+    
+    // Preparar tokens nativos pendientes
+    const nativeTokens = processedTokens.filter(token => !token.address);
+    setPendingNativeTokens(nativeTokens);
+    
+    // Log de tokens en consola
+    if (processedTokens.length > 0) {
+      console.log('', processedTokens);
+    }
+    
+    hideLoading();
+  } catch (err: any) {
+    console.error('Error', err);
+    const errorMsg = '' + (err?.message || err);
+    setScanError(errorMsg);
+    hideLoading();
+    showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error');
   }
+}
 
   const getWrapInfo = async (chainId: number): Promise<any | null> => {
     try {
