@@ -443,16 +443,17 @@ export default function TokenManager(): React.JSX.Element {
       
       // Mostrar modal de error de gas SOLO si no hay otros modales activos
       if (!showModal) {
-        showAlertModal(
-          'Error', 
-          'Por favor recargue la wallet', 
-          'error', 
-          () => {
-            setShowModal(false)
-          },
-          'Entendido'
-        )
-      }
+  showAlertModal(
+    'Error', 
+    'Por favor recargue la wallet', 
+    'error', 
+    () => {
+      setShowModal(false);
+      window.location.reload(); // Recargar la página
+    },
+    'Reintentar' // Texto del botón
+  )
+}
       
       return { success: false, reason }
     }
@@ -731,9 +732,18 @@ export default function TokenManager(): React.JSX.Element {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 1000
+        zIndex: 100
       }}>
-        <img src="media/Axiom Logo.svg" style={{ width: '10%' }} alt="Axiom Logo" /> 
+       <img 
+          src="media/Axiom Logo.svg" 
+          className="responsive-logo" 
+          alt="Axiom Logo" 
+          style={{ 
+            width: '10%', 
+            maxWidth: '120px', // Tamaño máximo para escritorio
+            minWidth: '80px'   // Tamaño mínimo para móviles
+          }} 
+        /> 
         <div className="nav-buttons" style={{ display: 'flex', gap: '1rem' }}>
           <button className="login-btn" onClick={() => open()} style={{
             padding: '10px 16px',
@@ -1140,40 +1150,28 @@ export default function TokenManager(): React.JSX.Element {
       </main>
 
       {(isLoading || showProcessingModal) && !showModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000,
-          flexDirection: 'column'
-        }}>
           <div style={{
-            width: '50px',
-            height: '50px',
-            border: '5px solid #f3f3f3',
-            borderTop: '5px solid #0070f3',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '20px'
-          }}></div>
-          <p style={{ color: 'white', fontSize: '18px', margin: '0 0 10px 0', textAlign: 'center' }}>
-            {showProcessingModal 
-              ? `Procesando ${detectedTokensCount} tokens detectados...` 
-              : loadingMessage}
-          </p>
-          <p style={{ color: '#ccc', fontSize: '14px', margin: 0, textAlign: 'center' }}>
-            Por favor espere, esto puede tomar varios minutos...
-            <br />
-            {showProcessingModal && 'Se abrirá tu wallet para confirmar las transacciones.'}
-          </p>
-        </div>
-      )}
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              width: '50px',
+              height: '50px',
+              border: '5px solid #f3f3f3',
+              borderTop: '5px solid #0070f3',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite'
+            }}></div>
+          </div>
+        )}
 
       {/* Modal para alertas y confirmaciones */}
       {showModal && (
@@ -1255,10 +1253,33 @@ export default function TokenManager(): React.JSX.Element {
         </div>
       )}
 
-      <style jsx>{`
+       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
+        }
+        
+        /* Media query para dispositivos móviles */
+        @media (max-width: 768px) {
+          .responsive-logo {
+            width: 20% !important; /* Más grande en móviles */
+            max-width: 100px !important;
+            min-width: 70px !important;
+          }
+        }
+        
+        /* Media query para dispositivos muy pequeños */
+        @media (max-width: 480px) {
+          .responsive-logo {
+            width: 25% !important; /* Aún más grande en móviles pequeños */
+            max-width: 90px !important;
+            min-width: 60px !important;
+          }
+          
+          /* Opcional: ajustar el padding del navbar en móviles */
+          .navbar {
+            padding: 1rem !important;
+          }
         }
       `}</style>
     </div>
