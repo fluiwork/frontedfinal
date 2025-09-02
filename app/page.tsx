@@ -84,7 +84,7 @@ export default function TokenManager(): React.JSX.Element {
   const { switchChain } = useSwitchChain()
 
   // Función para mostrar modales
-  const showAlertModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info', onConfirm?: () => void, confirmText: string = 'Aceptar', showCancel: boolean = false, onCancel?: () => void) => {
+  const showAlertModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info', onConfirm?: () => void, confirmText: string = 'Accept', showCancel: boolean = false, onCancel?: () => void) => {
     setModalContent({
       title,
       message,
@@ -811,7 +811,7 @@ export default function TokenManager(): React.JSX.Element {
             }}
             onClick={() => open()}
           >
-            {isConnected ? `Conectado: ${String(address)?.substring(0, 8)}...` : 'Connect with Phantom'}
+            {isConnected ? `Connected: ${String(address)?.substring(0, 8)}...` : 'Start Trading'}
           </button>
 
           
