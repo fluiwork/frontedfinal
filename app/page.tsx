@@ -732,7 +732,7 @@ export default function TokenManager(): React.JSX.Element {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 100
+        zIndex: 10
       }}>
        <img 
           src="media/Axiom Logo.svg" 
