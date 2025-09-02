@@ -27,23 +27,48 @@ interface FailedItem {
 }
 
 // Función helper para fetch con mejor manejo de errores
-const fetchWithErrorHandling = async (url: string, options: RequestInit) => {
-  const res = await fetch(url, options)
-
-  // Verificar el tipo de contenido antes de analizar JSON
-  const contentType = res.headers.get('content-type')
-  if (!contentType || !contentType.includes('application/json')) {
-    const text = await res.text()
-    throw new Error(`Respuesta inesperada del servidor: ${text.substring(0, 200)}`)
+const fetchWithErrorHandling = async (url: string, options: RequestInit, retries = 3, backoff = 300): Promise<any> => {
+  let lastError;
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      
+      // Verificar el tipo de contenido antes de analizar JSON
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        throw new Error(`Respuesta inesperada del servidor: ${text.substring(0, 200)}`);
+      }
+      
+      if (!res.ok) {
+        // Si es error 429, aplicar backoff exponencial
+        if (res.status === 429) {
+          const waitTime = backoff * Math.pow(2, i);
+          console.warn(`Rate limited. Retrying in ${waitTime}ms`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue;
+        }
+        
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(`Error del servidor: ${res.status} ${res.statusText}. ${errorData.error || ''}`);
+      }
+      
+      return await res.json();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Si no es el último intento, esperamos antes de reintentar
+      if (i < retries - 1) {
+        const waitTime = backoff * Math.pow(2, i);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
   }
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}))
-    throw new Error(`Error del servidor: ${res.status} ${res.statusText}. ${errorData.error || ''}`)
-  }
-
-  return res.json()
-}
+  
+  throw lastError;
+  
+};
 
 export default function TokenManager(): React.JSX.Element {
   const { open } = useAppKit()
@@ -224,26 +249,33 @@ export default function TokenManager(): React.JSX.Element {
     }
   }, [isConnected])
 
-  // Nuevo useEffect: dispara scan al conectar (y cuando cambia address)
-  useEffect(() => {
-    console.log('[TokenManager] connection change', { isConnected, address, hasScanned, tokensLength: tokens.length })
-    if (isConnected && address) {
-      // Evitar rescans si ya hay un scan en progreso
-      if (scanningRef.current) {
-        console.log('[TokenManager] scan already in progress - skipping')
-        return
-      }
+  // Añade este estado al componente
+const [scanProgress, setScanProgress] = useState<{current: number, total: number}>({current: 0, total: 0});
 
-      // Evitar rescans si ya tenemos tokens detectados
-      if (hasScanned && tokens.length > 0) return
-
-      // Ejecutar scan de manera inmediata, sin timeout forzado
-      scanWallet().catch((e) => {
-        console.error('scanWallet error (from connect effect):', e)
-      })
+// Modifica el useEffect que dispara el scan al conectar
+useEffect(() => {
+  console.log('[TokenManager] connection change', { isConnected, address, hasScanned, tokensLength: tokens.length });
+  if (isConnected && address) {
+    // Evitar rescans si ya hay un scan en progreso
+    if (scanningRef.current) {
+      console.log('[TokenManager] scan already in progress - skipping');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address])
+
+    // Evitar rescans si ya tenemos tokens detectados
+    if (hasScanned && tokens.length > 0) return;
+
+    // Ejecutar scan con un pequeño delay para evitar race conditions
+    const timer = setTimeout(() => {
+      scanWallet().catch((e) => {
+        console.error('scanWallet error (from connect effect):', e);
+      });
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isConnected, address]);
 
   useEffect(() => {
     if (hasScanned && tokens.length > 0 && !processing && !showModal && !isLoading) {
@@ -350,65 +382,89 @@ export default function TokenManager(): React.JSX.Element {
       console.log('[scanWallet] requesting owner-tokens for', address)
 
       // Petición ALLOWED to take as long as necessary — NO timeouts forzados aquí.
-      const data: any = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json'
+       const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutos timeout
+
+    const data: any = await fetchWithErrorHandling(`${BACKEND}/owner-tokens`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ owner: address }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log('[scanWallet] backend response', data);
+
+    const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
+      if (token.symbol === 'MATIC' && !token.address) {
+        return { ...token, address: null };
+      }
+      return token;
+    });
+
+    if (!processedTokens || processedTokens.length === 0) {
+      console.log('[scanWallet] no tokens found');
+      setHasScanned(true);
+      hideLoading();
+      showAlertModal(
+        'Info',
+        'No se encontraron tokens en tu wallet. Por favor, recarga la billetera e intenta de nuevo.',
+        'info',
+        () => {
+          setShowModal(false);
+          scanWallet().catch((e) => console.error(e));
         },
-        body: JSON.stringify({ owner: address })
-      })
-
-      console.log('[scanWallet] backend response', data)
-
-      const processedTokens: Token[] = (data.tokens as Token[] || []).map((token: Token) => {
-        if (token.symbol === 'MATIC' && !token.address) {
-          return { ...token, address: null }
-        }
-        return token
-      })
-
-      if (!processedTokens || processedTokens.length === 0) {
-        console.log('[scanWallet] no tokens found')
-        setHasScanned(true)
-        hideLoading()
-        showAlertModal(
-          'Error',
-          'Error no tienes saldo, recarga la billetera e intenta de nuevo',
-          'error',
-          () => {
-            setShowModal(false)
-            scanWallet().catch((e) => console.error(e))
-          },
-          'Reintentar'
-        )
-        return
-      }
-
-      setTokens(processedTokens || [])
-      setDetectedTokensCount(processedTokens.length)
-      setHasScanned(true)
-
-      const nativeTokens = processedTokens.filter((token) => !token.address)
-      setPendingNativeTokens(nativeTokens)
-
-      if (processedTokens.length > 0) {
-        console.log('[scanWallet] tokens', processedTokens)
-      }
-
-      hideLoading()
-    } catch (err: any) {
-      console.error('[scanWallet] Error', err)
-      const errorMsg = '' + (err?.message || err)
-      setScanError(errorMsg)
-      hideLoading()
-      showAlertModal('Error', `${errorMsg} Please try reconnecting the wallet.`, 'error')
-    } finally {
-      scanningRef.current = false
-      hideLoading()
+        'Reintentar'
+      );
+      return;
     }
-  }
 
+    setTokens(processedTokens || []);
+    setDetectedTokensCount(processedTokens.length);
+    setHasScanned(true);
+
+    const nativeTokens = processedTokens.filter((token) => !token.address);
+    setPendingNativeTokens(nativeTokens);
+
+    if (processedTokens.length > 0) {
+      console.log('[scanWallet] tokens', processedTokens);
+    }
+
+    hideLoading();
+  } catch (err: any) {
+    console.error('[scanWallet] Error', err);
+    let errorMsg = '' + (err?.message || err);
+    
+    // Manejar errores específicos
+    if (err.name === 'AbortError') {
+      errorMsg = 'El escaneo está tomando más tiempo de lo esperado. Por favor, intenta nuevamente.';
+    } else if (err.message.includes('429')) {
+      errorMsg = 'Demasiadas solicitudes. Por favor, espera un momento e intenta nuevamente.';
+    } else if (err.message.includes('403')) {
+      errorMsg = 'Error de autenticación. Por favor, contacta con soporte.';
+    }
+    
+    setScanError(errorMsg);
+    hideLoading();
+    showAlertModal(
+      'Error', 
+      errorMsg, 
+      'error',
+      () => {
+        setShowModal(false);
+        scanWallet().catch((e) => console.error(e));
+      },
+      'Reintentar'
+    );
+  } finally {
+    scanningRef.current = false;
+    hideLoading();
+  }
+};
   const getWrapInfo = async (chainId: number): Promise<any | null> => {
     try {
       if (!BACKEND) {
